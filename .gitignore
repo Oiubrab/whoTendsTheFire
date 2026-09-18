@@ -3,3 +3,5 @@ models/
 *.gguf
 .env
 db/
+runs/
+.kx/*
