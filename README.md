@@ -56,6 +56,16 @@ This is also the answer to "how does the model never leave the structure." It do
 
 The lifecycle stages described earlier — scaffold, implement, verify, integrate, ship — were never a separate idea from this. They are the backbone path through the graph, described before it had torches and edges. "Verify" is a validation torch. "Implement" is wherever the decision and action torches for a unit of work sit. The feature loop is a walk from one side of the graph to the other and back.
 
+## A run: the prophecy
+
+One full pass through the graph — from the user's first prompt to wherever the walk stops — is a **prophecy**.
+
+It starts with the user writing a prompt. Call that prompt **the invocation**: it is what opens the whole prophecy, and it is never spent. Every subsequent model call for the rest of that prophecy has the invocation read back into it, unchanged, alongside whatever the current torch needs — so no matter how many torches deep the walk has gone, the model is still answering toward the original ask, not some drifted paraphrase of it several steps removed.
+
+The current position in the graph is **the fire** — where we are, right now, in this prophecy. Standing at a torch, the fire is handed the invocation and that torch's offered options, and the model **lights** one: picks an edge. If the torch is an action torch, the framework writes the code or runs the install that torch specifies. The model may then be called once more, this time with the invocation plus that torch's own **rite** — a system prompt specific to that torch, covering whatever configuration or small scripting is needed to actually make the torch's work take hold. A validation torch then runs its check automatically. If it fails, the fire dies and the prophecy ends there — the simplest possible failure behavior, and a placeholder for something better once it's worth routing failures to a torch built for them instead (see "The shape: a graph," above). If it passes, the fire moves on, arriving at the next torch's offered options, the invocation still in force.
+
+A fire is not required to stay singular. If the model lights more than one torch from the same position — chooses two or more edges instead of one — the fire splits. Each lit edge becomes its own fire, its own model call, running in parallel, walking the graph independently from that point on. A prophecy is not one thread through the graph; it's however many fires happen to be burning at once, converging, dying, or spreading, all called into being by the same invocation.
+
 ## Rigid core, open scope
 
 Rigidity is not narrowness. A type system is rigid and expresses unbounded programs. The constraint is on *form*, never on reach.
