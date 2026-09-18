@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>whoTendsTheFire</title>
+<style>
+  :root {
+    --bg: #14100d;
+    --panel: #1c1611;
+    --panel-border: #332821;
+    --ink: #e8ddc8;
+    --ink-dim: #948872;
+    --unlit: #4a4136;
+    --frontier: #d98a2b;
+    --frontier-glow: #ffb454;
+    --lit: #ff6b35;
+    --lit-glow: #ff9d5c;
+    --neighbor: #6b5d47;
+    --edge: #3a2f26;
+    --edge-hot: #b5652c;
+    --err: #d9534f;
+    --decision: #5aa9e6;
+    --action: #6fbf73;
+    --validation: #c77dd1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 18px;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--frontier-glow);
+    white-space: nowrap;
+  }
+  header input[type=text] {
+    flex: 1;
+    min-width: 240px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--ink);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  header input[type=text]:focus { outline: 1px solid var(--frontier); }
+  button {
+    background: var(--frontier);
+    color: #1a1410;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: var(--frontier-glow); }
+  button.secondary {
+    background: transparent;
+    color: var(--ink-dim);
+    border: 1px solid var(--panel-border);
+    font-weight: 400;
+  }
+  button.secondary:hover { color: var(--ink); border-color: var(--ink-dim); }
+  main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  #graph-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 40%, #1e1712 0%, var(--bg) 70%);
+  }
+  svg { width: 100%; height: 100%; display: block; }
+  aside {
+    width: 340px;
+    border-left: 1px solid var(--panel-border);
+    background: var(--panel);
+    padding: 16px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  aside h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    margin: 18px 0 8px;
+    border-bottom: 1px solid var(--panel-border);
+    padding-bottom: 4px;
+  }
+  aside h2:first-child { margin-top: 0; }
+  .invocation-text {
+    font-style: italic;
+    color: var(--ink);
+    background: #0f0c09;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--panel-border);
+  }
+  .chip {
+    display: inline-block;
+    background: #2a2118;
+    border: 1px solid var(--panel-border);
+    color: var(--frontier-glow);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    margin: 2px 4px 2px 0;
+  }
+  .trail-row {
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--panel-border);
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .trail-row .t { color: var(--ink); font-weight: 600; }
+  .trail-row .o { color: var(--frontier-glow); }
+  .tree-line { font-family: ui-monospace, monospace; font-size: 12px; color: var(--ink-dim); white-space: pre; }
+  .muted { color: var(--ink-dim); font-size: 13px; }
+  .node circle, .node path.diamond, .node polygon {
+    stroke-width: 2px;
+    transition: stroke 0.25s, fill 0.25s, filter 0.25s;
+    cursor: default;
+  }
+  .node.clickable circle, .node.clickable path.diamond, .node.clickable polygon {
+    cursor: pointer;
+  }
+  .node.frontier circle, .node.frontier path.diamond, .node.frontier polygon {
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { filter: drop-shadow(0 0 4px var(--frontier)); }
+    50% { filter: drop-shadow(0 0 14px var(--frontier-glow)); }
+  }
+  .node.lit circle, .node.lit path.diamond, .node.lit polygon {
+    filter: drop-shadow(0 0 10px var(--lit-glow));
+  }
+  .node text {
+    fill: var(--ink);
+    font-size: 11px;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .node text.kind-label {
+    fill: var(--ink-dim);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  line.edge { stroke: var(--edge); stroke-width: 1.5px; transition: stroke 0.25s; }
+  line.edge.hot { stroke: var(--edge-hot); stroke-width: 2px; }
+  text.edge-label { fill: var(--ink-dim); font-size: 9px; text-anchor: middle; }
+  #picker {
+    position: absolute;
+    background: var(--panel);
+    border: 1px solid var(--frontier);
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    display: none;
+    z-index: 10;
+  }
+  #picker .rite { font-size: 12px; color: var(--ink-dim); margin-bottom: 8px; max-width: 220px; }
+  #picker button { display: block; width: 100%; margin-bottom: 6px; text-align: left; }
+  #picker button:last-child { margin-bottom: 0; }
+  #toast {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background: var(--err);
+    color: white;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    display: none;
+    max-width: 60%;
+  }
+  #legend {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    font-size: 11px;
+    color: var(--ink-dim);
+    background: rgba(20,16,13,0.7);
+    padding: 8px 10px;
+    border-radius: 6px;
+    line-height: 1.8;
+  }
+  #legend span.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<header>
+  <h1>&#128293; whoTendsTheFire</h1>
+  <input id="invocation" type="text" placeholder="What do you want to build? e.g. build me a small python cli tool" />
+  <button id="begin-btn">Begin Prophecy</button>
+  <button class="secondary" id="reset-btn">Reset view</button>
+</header>
+<main>
+  <div id="graph-wrap">
+    <div id="legend"></div>
+    <svg id="svg"></svg>
+    <div id="picker"></div>
+    <div id="toast"></div>
+  </div>
+  <aside>
+    <h2>Invocation</h2>
+    <div class="invocation-text muted" id="sb-invocation">No prophecy begun yet.</div>
+
+    <h2>Capabilities</h2>
+    <div id="sb-caps" class="muted">(none yet)</div>
+
+    <h2>Torches lit so far</h2>
+    <div id="sb-trail" class="muted">(none yet)</div>
+
+    <h2>Codebase</h2>
+    <div id="sb-tree" class="muted">(empty)</div>
+  </aside>
+</main>
+<script>
+const $ = sel => document.querySelector(sel);
+const svg = $("#svg");
+const NS = "http://www.w3.org/2000/svg";
+
+let graph = { nodes: [], edges: [] };
+let pos = {};
+let pid = null;
+let currentState = null;
+
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(toast._h);
+  toast._h = setTimeout(() => t.style.display = "none", 4000);
+}
+
+async function api(method, path, body) {
+  const opts = { method };
+  if (body !== undefined) {
+    opts.headers = { "Content-Type": "application/json" };
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const json = await res.json();
+  if (json && json.error) throw new Error(json.error);
+  return json;
+}
+
+// ---- layout: simple force simulation, run once, then static ----
+const END_ID = "__end__";
+
+function buildLayoutGraph() {
+  const nodeIds = graph.nodes.map(n => n.id);
+  const hasEnd = graph.edges.some(e => !e.dst);
+  const ids = hasEnd ? [...nodeIds, END_ID] : nodeIds;
+  ids.forEach((id, i) => {
+    const angle = (i / ids.length) * 2 * Math.PI;
+    pos[id] = {
+      x: 480 + 260 * Math.cos(angle) + (Math.random() - 0.5) * 20,
+      y: 320 + 260 * Math.sin(angle) + (Math.random() - 0.5) * 20,
+      vx: 0, vy: 0,
+    };
+  });
+  const edgePairs = graph.edges.map(e => ({ src: e.src, dst: e.dst || END_ID }));
+  for (let iter = 0; iter < 400; iter++) {
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = pos[ids[i]], b = pos[ids[j]];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let dist2 = dx * dx + dy * dy || 0.01;
+        let force = 9000 / dist2;
+        let dist = Math.sqrt(dist2);
+        dx /= dist; dy /= dist;
+        a.vx += dx * force; a.vy += dy * force;
+        b.vx -= dx * force; b.vy -= dy * force;
+      }
+    }
+    edgePairs.forEach(e => {
+      const a = pos[e.src], b = pos[e.dst];
+      if (!a || !b) return;
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      let force = (dist - 170) * 0.012;
+      dx /= dist; dy /= dist;
+      a.vx += dx * force; a.vy += dy * force;
+      b.vx -= dx * force; b.vy -= dy * force;
+    });
+    ids.forEach(id => {
+      const p = pos[id];
+      p.vx += (480 - p.x) * 0.0015;
+      p.vy += (320 - p.y) * 0.0015;
+      p.vx *= 0.82; p.vy *= 0.82;
+      p.x += p.vx; p.y += p.vy;
+    });
+  }
+}
+
+function kindColor(kind) {
+  if (kind === "decision") return "var(--decision)";
+  if (kind === "action") return "var(--action)";
+  if (kind === "validation") return "var(--validation)";
+  return "var(--unlit)";
+}
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function neighborsOf(id) {
+  const out = new Set();
+  graph.edges.forEach(e => {
+    if (e.src === id && e.dst) out.add(e.dst);
+    if (e.dst === id) out.add(e.src);
+  });
+  return out;
+}
+
+function render() {
+  svg.innerHTML = "";
+  const litSet = new Set((currentState && currentState.trail || []).map(r => r.torch));
+  const frontierSet = new Set((currentState && currentState.frontier) || []);
+  let neighborSet = new Set();
+  [...litSet, ...frontierSet].forEach(id => {
+    neighborsOf(id).forEach(n => neighborSet.add(n));
+  });
+
+  // legend
+  $("#legend").innerHTML = `
+    <div><span class="dot" style="background:var(--decision)"></span>decision</div>
+    <div><span class="dot" style="background:var(--action)"></span>action</div>
+    <div><span class="dot" style="background:var(--validation)"></span>validation</div>
+    <div style="margin-top:6px"><span class="dot" style="background:var(--lit)"></span>lit</div>
+    <div><span class="dot" style="background:var(--frontier)"></span>available now</div>
+    <div><span class="dot" style="background:var(--neighbor)"></span>nearby</div>
+  `;
+
+  // edges
+  graph.edges.forEach(e => {
+    const dstId = e.dst || END_ID;
+    const a = pos[e.src], b = pos[dstId];
+    if (!a || !b) return;
+    const hot = litSet.has(e.src) && (litSet.has(dstId) || frontierSet.has(dstId));
+    el("line", {
+      class: "edge" + (hot ? " hot" : ""),
+      x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+    }, svg);
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    el("text", { class: "edge-label", x: mx, y: my - 4 }, svg).textContent = e.label;
+  });
+
+  // end pseudo-node -- frontier holds "" (the terminal symbol) once a walk finishes
+  if (pos[END_ID]) {
+    const p = pos[END_ID];
+    const ended = frontierSet.has("");
+    el("circle", {
+      cx: p.x, cy: p.y, r: 8,
+      fill: ended ? "var(--lit)" : "#0f0c09",
+      stroke: ended ? "var(--lit-glow)" : "var(--edge)",
+      "stroke-width": 1.5,
+      style: ended ? "filter: drop-shadow(0 0 10px var(--lit-glow))" : "",
+    }, svg);
+    el("text", { x: p.x, y: p.y + 20 }, svg).textContent = "end";
+  }
+
+  // nodes
+  graph.nodes.forEach(n => {
+    const p = pos[n.id];
+    if (!p) return;
+    const isLit = litSet.has(n.id);
+    const isFrontier = frontierSet.has(n.id);
+    const isNeighbor = neighborSet.has(n.id) && !isLit && !isFrontier;
+    const cls = ["node"];
+    if (isLit) cls.push("lit");
+    if (isFrontier) cls.push("frontier", "clickable");
+    const g = el("g", { class: cls.join(" "), transform: `translate(${p.x},${p.y})` }, svg);
+
+    let fill = "var(--unlit)";
+    let stroke = kindColor(n.kind);
+    if (isNeighbor) { fill = "#2a2118"; stroke = "var(--neighbor)"; }
+    if (isFrontier) { fill = "#3a2410"; stroke = "var(--frontier)"; }
+    if (isLit) { fill = "var(--lit)"; stroke = "var(--lit-glow)"; }
+
+    el("circle", { r: 26, fill, stroke }, g);
+    el("text", { y: -32, class: "kind-label" }, g).textContent = n.kind;
+    const parts = n.id.split(".").map(p => p.length > 9 ? p.slice(0, 8) + "…" : p);
+    const startY = 4 - (parts.length - 1) * 6;
+    const t = el("text", { y: startY }, g);
+    parts.forEach((part, i) => {
+      const tspan = el("tspan", { x: 0, dy: i === 0 ? 0 : 12 }, t);
+      tspan.textContent = part;
+    });
+
+    if (isFrontier) {
+      g.addEventListener("click", (ev) => openPicker(n, ev));
+    }
+  });
+}
+
+function openPicker(node, ev) {
+  const picker = $("#picker");
+  const wrap = $("#graph-wrap").getBoundingClientRect();
+  picker.style.left = (ev.clientX - wrap.left + 12) + "px";
+  picker.style.top = (ev.clientY - wrap.top + 12) + "px";
+  picker.innerHTML = "";
+  if (node.rite) {
+    const r = document.createElement("div");
+    r.className = "rite";
+    r.textContent = node.rite;
+    picker.appendChild(r);
+  }
+  (node.options || []).forEach(opt => {
+    const b = document.createElement("button");
+    b.textContent = opt;
+    b.onclick = async () => {
+      picker.style.display = "none";
+      await light(node.id, opt);
+    };
+    picker.appendChild(b);
+  });
+  picker.style.display = "block";
+  const close = (e) => {
+    if (!picker.contains(e.target)) { picker.style.display = "none"; document.removeEventListener("click", close); }
+  };
+  setTimeout(() => document.addEventListener("click", close), 0);
+}
+
+async function light(torch, option) {
+  try {
+    const res = await api("POST", "/api/light", { pid, torch, option });
+    currentState = res.state;
+    updateSidebar();
+    render();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function updateSidebar() {
+  if (!currentState) return;
+  $("#sb-invocation").textContent = currentState.invocation || "(empty)";
+  const caps = currentState.capabilities || [];
+  $("#sb-caps").innerHTML = caps.length
+    ? caps.map(c => `<span class="chip">${c}</span>`).join("")
+    : '<span class="muted">(none yet)</span>';
+  const trail = currentState.trail || [];
+  $("#sb-trail").innerHTML = trail.length
+    ? trail.map(r => `<div class="trail-row"><span class="t">${r.torch}</span><span class="o">${r.option}</span></div>`).join("")
+    : '<span class="muted">(none yet)</span>';
+  const tree = currentState.tree || [];
+  $("#sb-tree").innerHTML = tree.length
+    ? tree.map(f => `<div class="tree-line">${f}</div>`).join("")
+    : '<span class="muted">(empty)</span>';
+}
+
+async function loadGraph() {
+  graph = await api("GET", "/api/graph");
+  buildLayoutGraph();
+  render();
+}
+
+$("#begin-btn").onclick = async () => {
+  const invocation = $("#invocation").value.trim();
+  if (!invocation) { toast("enter an invocation first"); return; }
+  try {
+    const res = await api("POST", "/api/begin", { invocation });
+    pid = res.pid;
+    currentState = res.state;
+    updateSidebar();
+    render();
+  } catch (e) {
+    toast(e.message);
+  }
+};
+
+$("#reset-btn").onclick = () => {
+  pid = null;
+  currentState = null;
+  $("#sb-invocation").textContent = "No prophecy begun yet.";
+  $("#sb-caps").innerHTML = "(none yet)";
+  $("#sb-trail").innerHTML = "(none yet)";
+  $("#sb-tree").innerHTML = "(empty)";
+  render();
+};
+
+loadGraph().catch(e => toast(e.message));
+</script>
+</body>
+</html>

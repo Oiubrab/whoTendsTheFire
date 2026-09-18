@@ -42,6 +42,8 @@ Most of this is not invention anyway. It is engineering: there are already ten t
 
 And a local model has a real edge here: it runs on your own machine for free, as long as you like, with no meter running. If the framework holds it to a tight enough standard, that local model can spend far more time and far more structured effort per problem than you'd ever pay for from a cloud model — closing the gap not by being smarter, but by being patient.
 
+This settles how small a torch should actually be. We don't have model power to spend, but we have unmetered time, so the trade is deliberate: accept however many extra hops it takes in exchange for each one being close to certain. A torch shouldn't be sized to a phase of a project — it should be sized to the smallest single action with an unambiguous outcome. "Install Docker" is a torch. "Add argument parsing to this script" is a torch. If describing one takes a paragraph, it isn't one torch, it's several. The extra hops cost nothing but machine time; a wrong guess at a torch sized too large costs the whole run.
+
 ## The shape: a graph
 
 This is not a single abstract pause button. It is a node in a graph, and the graph is the whole system. We give the node a name in keeping with the rest of this document and call it a **torch** — it's what the framework carries forward, and it's the point of light the model is handed for one narrow moment before the framework moves on without it.
