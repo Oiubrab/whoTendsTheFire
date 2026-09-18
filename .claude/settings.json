@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "kx-skills": {
+      "source": {
+        "source": "github",
+        "repo": "KxSystems/kx-skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "q-knowledge@kx-skills": true
+  }
+}

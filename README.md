@@ -28,7 +28,7 @@ Two things follow. The model spends most of its capacity re-deriving what was ne
 
 In a conventional harness the model is the engine and the structure is advisory. Here it is the other way around.
 
-The framework is the engine. It walks the determined parts itself, deterministically, and it halts when it reaches a seam it cannot close on its own. At that seam it states the question, the legal answers, and the shape a valid response must take. A model answers. The framework validates that answer against the seam's contract and carries on.
+The framework is the engine. It walks the determined parts itself, deterministically, and it halts when it reaches a point it cannot get past on its own. At that point it states the question, the legal answers, and the shape a valid response must take. A model answers. The framework validates that answer against the point's contract and carries on. (This point has a name — see [The shape: a graph](#the-shape-a-graph) below.)
 
 The model is an oracle consulted at named points, not a driver holding the wheel.
 
@@ -36,21 +36,37 @@ The model is an oracle consulted at named points, not a driver holding the wheel
 
 A 20B model on a desktop GPU cannot hold an under-specified problem steady across a long agentic run. It can pick correctly from four options when the options are in front of it and the question is one sentence.
 
-Small models rarely fail in conventional harnesses because they cannot reason. They fail because they are asked to reason about everything at once, with no way for the harness to distinguish a good answer from a bad one. Narrow the question and the gap between a local model and a frontier model narrows with it. At many seams it closes completely.
+Small models rarely fail in conventional harnesses because they cannot reason. They fail because they are asked to reason about everything at once, with no way for the harness to distinguish a good answer from a bad one. Narrow the question and the gap between a local model and a frontier model narrows with it. At many of these points it closes completely.
 
-Because each seam declares its own question and its own contract, the model behind a seam becomes configuration. Route the bounded choices to whatever runs on the desk; route the genuine inventions to the largest model available; change your mind later without touching the structure. Rotation is a config edit, not a rewrite.
+Most of this is not invention anyway. It is engineering: there are already ten thousand tools out there that solve the piece you're stuck on, and the real work is picking the right one and wiring it in correctly. That's where the creative choice actually lives — which tool, which library, which pattern, not writing something novel from nothing. Once the framework is doing that centralizing — deciding what to use and where — the model behind any given point is just a setting. Swap in a bigger model for the hard points, leave a local one on the easy ones, change it later without touching anything else.
+
+And a local model has a real edge here: it runs on your own machine for free, as long as you like, with no meter running. If the framework holds it to a tight enough standard, that local model can spend far more time and far more structured effort per problem than you'd ever pay for from a cloud model — closing the gap not by being smarter, but by being patient.
+
+## The shape: a graph
+
+This is not a single abstract pause button. It is a node in a graph, and the graph is the whole system. We give the node a name in keeping with the rest of this document and call it a **torch** — it's what the framework carries forward, and it's the point of light the model is handed for one narrow moment before the framework moves on without it.
+
+There are three kinds of torch. A **decision torch** hands the model a finite, enumerated set of options and nothing else — it returns a choice, not prose. An **action torch** takes a choice already made and runs deterministic code against it — codegen, a build step, a file write — with no model involved at all. A **validation torch** runs a check and does nothing but branch on the result.
+
+Edges are outcomes, not arrows drawn for convenience. A decision torch has exactly one outgoing edge per option offered. A validation torch has a pass edge, and — this is the part that matters — a *separate* fail edge per class of failure, each one landing on a torch built to handle that specific problem. A wrong import and a broken architecture do not both loop back to "try again." They go to different places, because they are different problems.
+
+The graph lives in a database, not in the engine's code. The engine's only job is to walk it: stand at a torch, gather what that torch needs, invoke a model or run deterministic code as the torch's type demands, take the result, follow the matching edge, repeat. It does not know what any torch "means." That knowledge lives entirely in the graph's data, which is what makes extension safe — a new capability is a new torch and a new edge, committed to the database, and the engine that walks the graph never has to change to accommodate it.
+
+This is also the answer to "how does the model never leave the structure." It doesn't hold a pointer into the graph and never did. At a decision torch, the harness calls the model as a pure function — these are your options, or here is a narrow enough spec to write a small script — and reads back a choice or a small artifact. The harness is the only thing that ever moves the current position. There is no path from inside a model call back out to the graph, because the model was never given the graph to navigate — only the one torch's contract, in isolation, held out to it and then taken back.
+
+The lifecycle stages described earlier — scaffold, implement, verify, integrate, ship — were never a separate idea from this. They are the backbone path through the graph, described before it had torches and edges. "Verify" is a validation torch. "Implement" is wherever the decision and action torches for a unit of work sit. The feature loop is a walk from one side of the graph to the other and back.
 
 ## Rigid core, open scope
 
 Rigidity is not narrowness. A type system is rigid and expresses unbounded programs. The constraint is on *form*, never on reach.
 
-Extension happens by declaring new normal forms and new seams — never by loosening the structure to accommodate an awkward case. When something cannot be expressed, the answer is a new form, not an escape hatch. The moment the framework grows a "just do whatever here" path, it has become every other harness.
+Extension happens by declaring new normal forms and new torches — never by loosening the structure to accommodate an awkward case. When something cannot be expressed, the answer is a new form, not an escape hatch. The moment the framework grows a "just do whatever here" path, it has become every other harness.
 
 ## The ratchet
 
 Every model invocation is a debt, not an achievement.
 
-When the same seam returns the same answer time after time, that was law wearing a costume. Encode it and the seam closes permanently. The set of points where a model is consulted should shrink as the system matures, which means reliability and cost improve with age.
+When the same torch returns the same answer time after time, that was law wearing a costume. Encode it and the torch closes permanently. The set of points where a model is consulted should shrink as the system matures, which means reliability and cost improve with age.
 
 This is the opposite of prompt-based scaffolding, which only ever accretes.
 
