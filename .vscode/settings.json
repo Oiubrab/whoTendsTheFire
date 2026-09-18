@@ -1,0 +1,5 @@
+{
+    "kdb.connectionMap": {
+        ".kx/workbook-1.kdb.q": "torches"
+    }
+}
