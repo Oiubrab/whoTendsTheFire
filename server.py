@@ -13,6 +13,8 @@ import secrets
 import socketserver
 import subprocess
 import sys
+import re
+import time
 import urllib.parse
 import urllib.request
 
@@ -320,7 +322,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 evolution = bool(body.get("evolution", False))
                 hid = "h" + secrets.token_hex(4)
                 pid = "p" + secrets.token_hex(4)
-                dest = os.path.join(RUNS_DIR, hid, pid)
+                # the id stays random because it is a database key, but the
+                # DIRECTORY gets a date and a slug: twenty folders named
+                # h2bde009c tell a human nothing about when they ran or what
+                # they were building, and reconstructing that later needed
+                # archaeology across nine db snapshots.
+                slug = re.sub(r"[^a-z0-9]+", "-", invocation.lower()).strip("-")[:40] or "run"
+                stamp = time.strftime("%Y-%m-%d-%H%M")
+                dest = os.path.join(RUNS_DIR, f"{stamp}-{slug}-{hid[1:5]}", pid)
                 os.makedirs(RUNS_DIR, exist_ok=True)
                 expr = (
                     f"ignite[{qsym(hid)};{qstr(invocation)};{'1b' if evolution else '0b'}];"
