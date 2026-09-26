@@ -11,6 +11,24 @@ A torch is a node. Three kinds, and the kind determines who acts:
 | `decision` | the model | Offered a finite enumerated set of options; returns exactly one. |
 | `action` | the framework | Runs deterministic code — writes files, installs tools, runs a build step. |
 | `validation` | the framework | Runs a check. Branches on what actually happened. |
+| `authoring` | the model | Writes the contents of one file. The only kind that returns an artifact rather than a choice. |
+| `kindling` | the model | Produces the invocation for a daughter prophecy. |
+
+### Authoring torches
+
+The one place narrowing runs out. Everything else in this system reduces
+the question until the answer is a choice; writing a feature cannot be
+reduced that far, so an authoring torch takes back a file instead of an
+option.
+
+It is still fenced. The torch declares its own `target` path in the
+graph — the model does not choose where its output lands. Output that
+does not compile is refused rather than written, and a validation torch
+runs over the result regardless. The model writes the content; it does
+not get to decide whether the result is acceptable.
+
+A target ending in `/` means "a new file in this directory", which is
+what keeps cost per generation flat — see [04](04-the-lineage.md).
 
 A torch is a self-contained module, not a label. It carries:
 
@@ -20,6 +38,16 @@ A torch is a self-contained module, not a label. It carries:
 - **toolreqs** — what must be installed for it to work, with a probe and an install command
 - **options** — its labelled outgoing edges
 - **provides / requires** — capability declarations (below)
+
+### Write modes
+
+A file row is `write` (overwrite every time) or `once` (create if absent,
+never overwrite).
+
+`once` is not a nicety. A scaffold torch that rewrote `cli.py` on every
+walk destroyed whatever the previous generation had built, and three
+generations of this system produced three byte-identical files before
+anyone noticed. A dispatcher has to survive its own descendants.
 
 ### Option scoping
 

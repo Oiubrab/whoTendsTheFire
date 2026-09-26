@@ -99,7 +99,7 @@ Same instinct, two directions: **turn whatever repeats into structure**, whichev
 Against the four conditions:
 
 - **Metabolizing** — yes. Compute in, work out, waste behind.
-- **Self-replicating** — by design, via kindling. Not yet implemented.
-- **Continuous / self-sustaining** — this is the real gap. Today the process halts the moment a prophecy resolves and waits for a person to type the next invocation. A thing that metabolizes does not wait to be fed one meal at a time. Kindling is precisely the mechanism that closes this loop.
+- **Self-replicating** — yes, via kindling. Implemented.
+- **Continuous / self-sustaining** — implemented, and deliberately fenced. A hearth with `autokindle` on runs generation after generation unattended; the ceilings (`maxgen`, `maxproph`) are what stop it, and `kindle` refuses rather than warns when one is hit. `autokindle` is off by default, meaning a person approves each generation unless they explicitly say otherwise.
 
-And the honest warning, which belongs here rather than buried in a footnote: **a dynamo is bounded by its validation gate; a metabolism with no check on whether it may feed itself again is bounded by nothing.** Whatever decides "does this hearth get to invoke itself once more" is the hardest problem in this design — harder than torch-authoring, harder than selection — and it is unsolved. See [06](06-open-problems.md).
+And the honest warning, which belongs here rather than buried in a footnote: **a dynamo is bounded by its validation gate; a metabolism with no check on whether it may feed itself again is bounded by nothing.** The ceilings implemented today are a crude answer to that — they stop a runaway by counting, not by judging. They are enough to make the loop safe to run on a desktop and nowhere near enough to make it trustworthy at scale. What *should* decide whether a hearth has earned another generation is still open. See [06](06-open-problems.md).

@@ -75,13 +75,21 @@ Because validation outcomes are resolved rather than chosen, the chronicle is an
 
 A working directory containing whatever its action torches wrote and its code steps produced. Under the biological frame this is the waste product — useful, worth collecting, but not the measure of the system's health. See [04](04-the-lineage.md).
 
+## How a prophecy ends
+
+Three ways, and they are not the same event:
+
+- **The frontier empties.** Every fire reached a terminal edge. The ordinary ending.
+- **A validation torch fails.** Today the fire dies and the walk stops, because failure routing is still a stub ([06](06-open-problems.md)). A prophecy that dies here never reaches a kindling torch, so it leaves no daughter.
+- **A kindling torch fires.** The walk still ends, but it has produced the invocation for a daughter first. This is the only ending that continues the lineage.
+
 ## Current API
 
 Implemented in `q/torches.q`:
 
 | Function | Purpose |
 |----------|---------|
-| `begin[pid;invocation;dest]` | Open a prophecy: pin its invocation and working directory, seed the frontier with the graph's roots. |
+| `begin[hid;pid;g;invocation;dest]` | Open a prophecy inside a hearth: pin its invocation and working directory, seed the frontier with graph `g`'s roots. |
 | `light[tid;opt;dest]` | Carry out one torch. Ensure, materialize, run, resolve, report. Prophecy-agnostic. |
 | `lightin[pid;tid;opt]` | Light a torch *inside* a prophecy: enforce the frontier, log to the chronicle, update the frontier. |
 | `walk[frm;lbl]` | Raw edge lookup. What this option points at. |
@@ -89,4 +97,4 @@ Implemented in `q/torches.q`:
 | `capabilities[pid]` | Everything granted by choices made so far. |
 | `state[pid]` | Full snapshot: invocation, dest, frontier, chronicle, capabilities, tree. |
 | `brief[pid;tid]` / `briefText[pid;tid]` | The context bundle for a model call, structured or rendered. |
-| `roots[]` | Torches with no incoming edge. The starting frontier. |
+| `roots[g]` | Torches in graph `g` with no incoming edge. The starting frontier. |

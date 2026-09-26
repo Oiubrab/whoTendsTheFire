@@ -6,6 +6,31 @@ Ordered roughly by how badly they block what comes next.
 
 ---
 
+## 0. Resolved since this was written
+
+**Quadratic authoring cost.** Every generation used to re-emit the whole
+program, so cost grew each generation and a run truncated mid-file at
+around 160 lines. Features are now separate modules discovered by a
+stable dispatcher: each generation writes one small file and touches
+nothing else. Measured across five generations: 640, 267, 502, 1177,
+1075 bytes — flat, against 1600/3000/4500/5700-then-truncated before.
+
+**Validation that validated nothing.** `verify.cli` checked that
+`python3 cli.py --help` exited 0, which is true of a file that only
+defines functions and never calls `main()` — exactly what a truncated
+generation produces. There are now three gates: the code must compile
+before it is written at all, the program must emit real usage text, and
+it must survive being run with actual arguments.
+
+**Nothing could tell a good feature from a running one.** Each
+generation now writes a test for its own feature against a fixed
+fixture, and `test.suite` runs every test written so far. A later
+generation that breaks an earlier feature fails rather than passing
+because its own subcommand happens to work. This is the first thing in
+the system that measures quality rather than liveness — and it is a
+partial answer to problem 1 below, arrived at by choosing a domain where
+correctness is checkable rather than by inventing a metric.
+
 ## 1. The fitness function
 
 **Blocks:** [evolution mode](05-evolution.md), entirely.

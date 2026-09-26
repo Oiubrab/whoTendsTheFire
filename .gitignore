@@ -5,3 +5,5 @@ models/
 db/
 runs/
 .kx/*
+__pycache__/
+db.*/

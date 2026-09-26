@@ -22,6 +22,8 @@
     --decision: #5aa9e6;
     --action: #6fbf73;
     --validation: #c77dd1;
+    --kindling: #e8c44a;
+    --authoring: #7fd4c1;
   }
   * { box-sizing: border-box; }
   body {
@@ -92,7 +94,7 @@
   }
   svg { width: 100%; height: 100%; display: block; }
   aside {
-    width: 340px;
+    width: 430px;
     border-left: 1px solid var(--panel-border);
     background: var(--panel);
     padding: 16px;
@@ -138,6 +140,18 @@
   .trail-row .t { color: var(--ink); font-weight: 600; }
   .trail-row .o { color: var(--frontier-glow); }
   .tree-line { font-family: ui-monospace, monospace; font-size: 12px; color: var(--ink-dim); white-space: pre; }
+  .codefile { margin-bottom: 10px; }
+  .codefile .fname {
+    font-family: ui-monospace, monospace; font-size: 11px;
+    color: var(--authoring); margin-bottom: 3px;
+  }
+  .codefile pre, pre.runout {
+    margin: 0; background: #0d0b08; border: 1px solid var(--panel-border);
+    border-radius: 5px; padding: 8px; font-family: ui-monospace, monospace;
+    font-size: 11px; line-height: 1.45; color: var(--ink);
+    max-height: 320px; overflow: auto; white-space: pre;
+  }
+  pre.runout { color: #9fd98a; max-height: 160px; }
   .muted { color: var(--ink-dim); font-size: 13px; }
   .node circle, .node path.diamond, .node polygon {
     stroke-width: 2px;
@@ -208,6 +222,26 @@
     border-radius: 6px;
     line-height: 1.8;
   }
+  #statusbar {
+    padding: 7px 20px; border-bottom: 1px solid var(--panel-border);
+    background: #17120e; font-size: 12.5px; color: var(--ink-dim);
+    display: flex; align-items: center; gap: 9px; min-height: 32px;
+  }
+  #statusbar.busy { color: var(--frontier-glow); }
+  #spinner { width: 11px; height: 11px; flex-shrink: 0; }
+  #statusbar.busy #spinner {
+    border: 2px solid var(--frontier); border-top-color: transparent;
+    border-radius: 50%; animation: spin 0.75s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .autolbl { font-size: 12px; color: var(--ink-dim); display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .node.working circle {
+    animation: working 0.9s ease-in-out infinite;
+  }
+  @keyframes working {
+    0%,100% { filter: drop-shadow(0 0 6px var(--frontier-glow)); }
+    50%     { filter: drop-shadow(0 0 22px var(--lit-glow)); }
+  }
   #legend span.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 </style>
 </head>
@@ -215,9 +249,12 @@
 <header>
   <h1>&#128293; whoTendsTheFire</h1>
   <input id="invocation" type="text" placeholder="What do you want to build? e.g. build me a small python cli tool" />
-  <button id="begin-btn">Begin Prophecy</button>
+  <button id="begin-btn">Light the Hearth</button>
+  <button class="secondary" id="stop-btn" style="display:none">Stop</button>
   <button class="secondary" id="reset-btn">Reset view</button>
+  <label class="autolbl"><input type="checkbox" id="auto-chk" checked> run itself</label>
 </header>
+<div id="statusbar"><span id="spinner"></span><span id="status">idle</span></div>
 <main>
   <div id="graph-wrap">
     <div id="legend"></div>
@@ -226,8 +263,12 @@
     <div id="toast"></div>
   </div>
   <aside>
-    <h2>Invocation</h2>
-    <div class="invocation-text muted" id="sb-invocation">No prophecy begun yet.</div>
+    <h2>Ember</h2>
+    <div class="invocation-text muted" id="sb-ember">No hearth lit yet.</div>
+
+    <h2>This prophecy</h2>
+    <div class="invocation-text muted" id="sb-invocation">—</div>
+    <div class="muted" id="sb-gen" style="margin-top:6px"></div>
 
     <h2>Capabilities</h2>
     <div id="sb-caps" class="muted">(none yet)</div>
@@ -237,6 +278,15 @@
 
     <h2>Codebase</h2>
     <div id="sb-tree" class="muted">(empty)</div>
+
+    <h2>Lineage</h2>
+    <div id="sb-lineage" class="muted">(none yet)</div>
+
+    <h2>Code produced</h2>
+    <div id="sb-code" class="muted">(nothing written yet)</div>
+
+    <h2>What it printed when run</h2>
+    <pre id="sb-output" class="runout">(not run yet)</pre>
   </aside>
 </main>
 <script>
@@ -247,10 +297,13 @@ const NS = "http://www.w3.org/2000/svg";
 let graph = { nodes: [], edges: [] };
 let pos = {};
 let pid = null;
+let hearth = null;
 let currentState = null;
 
-function toast(msg) {
+function toast(msg, kind) {
   const t = $("#toast");
+  t.style.background = kind === "ok" ? "var(--frontier)" : "var(--err)";
+  t.style.color = kind === "ok" ? "#1a1410" : "white";
   t.textContent = msg;
   t.style.display = "block";
   clearTimeout(toast._h);
@@ -322,6 +375,8 @@ function kindColor(kind) {
   if (kind === "decision") return "var(--decision)";
   if (kind === "action") return "var(--action)";
   if (kind === "validation") return "var(--validation)";
+  if (kind === "kindling") return "var(--kindling)";
+  if (kind === "authoring") return "var(--authoring)";
   return "var(--unlit)";
 }
 
@@ -355,6 +410,8 @@ function render() {
     <div><span class="dot" style="background:var(--decision)"></span>decision</div>
     <div><span class="dot" style="background:var(--action)"></span>action</div>
     <div><span class="dot" style="background:var(--validation)"></span>validation</div>
+    <div><span class="dot" style="background:var(--kindling)"></span>kindling</div>
+    <div><span class="dot" style="background:var(--authoring)"></span>authoring</div>
     <div style="margin-top:6px"><span class="dot" style="background:var(--lit)"></span>lit</div>
     <div><span class="dot" style="background:var(--frontier)"></span>available now</div>
     <div><span class="dot" style="background:var(--neighbor)"></span>nearby</div>
@@ -396,6 +453,7 @@ function render() {
     const isFrontier = frontierSet.has(n.id);
     const isNeighbor = neighborSet.has(n.id) && !isLit && !isFrontier;
     const cls = ["node"];
+    if (n.id === workingTorch) cls.push("working");
     if (isLit) cls.push("lit");
     if (isFrontier) cls.push("frontier", "clickable");
     const g = el("g", { class: cls.join(" "), transform: `translate(${p.x},${p.y})` }, svg);
@@ -420,7 +478,9 @@ function render() {
       g.addEventListener("click", (ev) => {
         // validation torches don't get a choice -- codeOk decides pass/fail,
         // never the person clicking, so just light it and let the engine resolve it.
-        if (n.kind === "validation") light(n.id, n.options[0]);
+        if (n.kind === "authoring") authorAt(n);
+        else if (n.kind === "validation") light(n.id, n.options[0]);
+        else if (n.kind === "kindling") kindleFrom(n);
         else openPicker(n, ev);
       });
     }
@@ -455,11 +515,162 @@ function openPicker(node, ev) {
   setTimeout(() => document.addEventListener("click", close), 0);
 }
 
+async function kindleFrom(node) {
+  // a kindling torch asks what to build next, then spawns a daughter
+  // prophecy and moves the view into it. The engine refuses if the
+  // hearth is out of budget, and that refusal surfaces as a toast.
+  const proposed = prompt(node.rite || "What should the next prophecy build?");
+  if (proposed === null) return;
+  const invocation = proposed.trim();
+  if (!invocation) { await light(node.id, "decline"); return; }
+  try {
+    const spawned = await api("POST", "/api/kindle", { pid, invocation, graph: node.graph });
+    await light(node.id, "spawn");
+    pid = spawned.pid;
+    currentState = spawned.state;
+    updateSidebar();
+    await refreshLineage();
+    await refreshCode();
+    render();
+    toast(`kindled generation ${spawned.state.generation}`, "ok");
+  } catch (e) {
+    toast(e.message);
+    await light(node.id, "decline");
+  }
+}
+
+let running = false;
+let stopRequested = false;
+let workingTorch = null;
+
+function status(msg, busy) {
+  $("#status").textContent = msg;
+  $("#statusbar").classList.toggle("busy", !!busy);
+}
+
+function setWorking(id) { workingTorch = id; render(); }
+
+// Walks the prophecy on its own, one torch at a time, updating the page
+// after each step. Model calls take real time -- 30s or so each -- so
+// the status line names what it is waiting on rather than going blank.
+async function autoRun() {
+  if (running) return;
+  running = true; stopRequested = false;
+  $("#stop-btn").style.display = "";
+  $("#begin-btn").disabled = true;
+  try {
+    for (let step = 0; step < 60; step++) {
+      if (stopRequested) { status("stopped", false); break; }
+      const fr = (currentState && currentState.frontier || []).filter(Boolean);
+      if (!fr.length) { status("prophecy complete — the fire went out", false); break; }
+
+      const id = fr[0];
+      const node = graph.nodes.find(n => n.id === id);
+      setWorking(id);
+
+      if (node.kind === "authoring") {
+        status(`${id}: the local model is writing the code…`, true);
+        try {
+          const r = await api("POST", "/api/authorize", { pid, torch: id });
+          status(`${id}: wrote cli.py (${r.bytes} bytes)`, true);
+        } catch (e) { status(`${id}: ${e.message}`, true); }
+        await light(id, node.options[0]);
+        await refreshCode();
+
+      } else if (node.kind === "kindling") {
+        status(`${id}: asking what to build next…`, true);
+        const p = await api("POST", "/api/propose", { pid, torch: id });
+        if (p.decline) {
+          status("nothing further proposed — lineage ends here", false);
+          await light(id, "decline");
+          break;
+        }
+        status(`kindling: ${p.invocation}`, true);
+        const spawned = await api("POST", "/api/kindle",
+          { pid, invocation: p.invocation, graph: node.graph });
+        await light(id, "spawn");
+        pid = spawned.pid;
+        currentState = spawned.state;
+        updateSidebar();
+        await refreshLineage();
+        await refreshCode();
+        $("#sb-output").textContent = "(not run yet)";
+  status("idle", false);
+        render();
+        toast(`generation ${spawned.state.generation} kindled`, "ok");
+
+      } else if (node.kind === "validation") {
+        status(`${id}: running the check…`, true);
+        await light(id, node.options[0]);
+        await refreshCode();
+
+      } else {
+        status(`${id}: choosing…`, true);
+        const c = await api("POST", "/api/choose", { pid, torch: id });
+        if (c.asked) status(`${id}: model chose "${c.option}"`, true);
+        await light(id, c.option);
+        await refreshCode();
+      }
+      setWorking(null);
+    }
+  } catch (e) {
+    status("error: " + e.message, false);
+    toast(e.message);
+  } finally {
+    setWorking(null);
+    running = false;
+    stopRequested = false;
+    $("#stop-btn").style.display = "none";
+    $("#begin-btn").disabled = false;
+  }
+}
+
+async function authorAt(node) {
+  toast("asking the local model to write the code… this takes a minute", "ok");
+  try {
+    const r = await api("POST", "/api/authorize", { pid, torch: node.id });
+    toast(`wrote cli.py (${r.bytes} bytes)`, "ok");
+  } catch (e) {
+    toast(e.message);
+  }
+  await light(node.id, node.options[0]);
+  await refreshCode();
+}
+
+async function refreshCode() {
+  if (!pid) return;
+  try {
+    const r = await api("GET", `/api/file?pid=${pid}`);
+    const names = Object.keys(r.files).sort();
+    $("#sb-code").innerHTML = names.length
+      ? names.map(n => `<div class="codefile"><div class="fname">${n}</div>` +
+          `<pre>${r.files[n].replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre></div>`).join("")
+      : '<span class="muted">(nothing written yet)</span>';
+  } catch (e) { /* informational */ }
+}
+
+async function refreshLineage() {
+  if (!hearth) return;
+  try {
+    const rows = await api("GET", `/api/lineage?hearth=${hearth}`);
+    $("#sb-lineage").innerHTML = rows.map(r =>
+      `<div class="trail-row"><span class="t">gen ${r.generation}</span>` +
+      `<span class="o" style="flex:1;text-align:left;margin-left:8px">${r.invocation}</span></div>`
+    ).join("") || '<span class="muted">(none yet)</span>';
+  } catch (e) { /* lineage is informational; never block on it */ }
+}
+
 async function light(torch, option) {
   try {
     const res = await api("POST", "/api/light", { pid, torch, option });
     currentState = res.state;
+    // a demo/validation torch actually ran the program -- show what it said
+    const out = (res.result && res.result.output) || [];
+    if (out.length && Array.isArray(out)) {
+      $("#sb-output").textContent = out.join("\n");
+    }
     updateSidebar();
+    await refreshCode();
     render();
   } catch (e) {
     toast(e.message);
@@ -468,7 +679,10 @@ async function light(torch, option) {
 
 function updateSidebar() {
   if (!currentState) return;
+  $("#sb-ember").textContent = currentState.ember || "(empty)";
   $("#sb-invocation").textContent = currentState.invocation || "(empty)";
+  $("#sb-gen").textContent = `generation ${currentState.generation}`
+    + (currentState.parent ? ` · daughter of ${currentState.parent}` : " · founding prophecy");
   const caps = currentState.capabilities || [];
   $("#sb-caps").innerHTML = caps.length
     ? caps.map(c => `<span class="chip">${c}</span>`).join("")
@@ -493,20 +707,33 @@ $("#begin-btn").onclick = async () => {
   const invocation = $("#invocation").value.trim();
   if (!invocation) { toast("enter an invocation first"); return; }
   try {
-    const res = await api("POST", "/api/begin", { invocation });
+    const res = await api("POST", "/api/begin", { invocation, autokindle: true });
     pid = res.pid;
+    hearth = res.hearth;
     currentState = res.state;
     updateSidebar();
+    await refreshLineage();
+    await refreshCode();
     render();
+    if ($("#auto-chk").checked) autoRun();
   } catch (e) {
     toast(e.message);
   }
 };
 
+$("#stop-btn").onclick = () => { stopRequested = true; status("stopping after this step…", true); };
+
 $("#reset-btn").onclick = () => {
   pid = null;
+  hearth = null;
   currentState = null;
-  $("#sb-invocation").textContent = "No prophecy begun yet.";
+  $("#sb-ember").textContent = "No hearth lit yet.";
+  $("#sb-invocation").textContent = "—";
+  $("#sb-gen").textContent = "";
+  $("#sb-lineage").innerHTML = "(none yet)";
+  $("#sb-code").innerHTML = "(nothing written yet)";
+  $("#sb-output").textContent = "(not run yet)";
+  status("idle", false);
   $("#sb-caps").innerHTML = "(none yet)";
   $("#sb-trail").innerHTML = "(none yet)";
   $("#sb-tree").innerHTML = "(empty)";
