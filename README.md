@@ -2,6 +2,8 @@
 
 An LLM harness built on the premise that most of software development is not creative work, and should stop being handed to a model as though it were.
 
+*This document is the argument. The specification lives in [docs/](docs/00-index.md) — including a glossary, since this project coins a lot of vocabulary, and an honest [list of what's still unsolved](docs/06-open-problems.md).*
+
 ## The premise
 
 Walk outside and you are obeying physical law — gravity, friction, the mechanics of your own joints. You are also choosing: the path or the grass, this stride or the next. And once in a long while you do something genuinely inventive; you walk on your hands.
@@ -82,9 +84,37 @@ When the same torch returns the same answer time after time, that was law wearin
 
 This is the opposite of prompt-based scaffolding, which only ever accretes.
 
+## The dynamo
+
+Everything so far describes a graph that a person authors and a model walks. The natural next step is a graph that grows itself — new torches minted while a prophecy runs, not just new choices among ones that already exist. Done carelessly this is exactly the "just figure it out" escape hatch the rest of this document argues against, so it only belongs here if torch-creation is made into a normal form rather than a backdoor.
+
+The way to keep it honest: a **torch-authoring torch** is still an ordinary torch. It proposes a new torch's rite, code, files, and tool requirements in the same schema every other torch already uses — it does not get to skip the form, only to produce more of it. Nothing it proposes enters the live graph on its own say-so. A validation torch dry-runs the proposal — sandboxed, against synthetic input — before it's trusted, exactly like any other check in this system. A proposal that fails validation just dies, the same as any other failed torch. The graph never grows because a model asserted something; it grows because something passed the same gate everything else has to pass.
+
+This gives the ratchet a second direction. The ratchet consolidates inward: a torch that keeps returning the same answer collapses into law, and the graph gets smaller and more certain over time. The dynamo is the mirror, running outward: when raw invention at some torch keeps recurring in a similar shape across prophecies, that recurrence is the signal to mint a new torch and formalize it — shrinking how often real invention is needed the next time it comes up. Together they are the same instinct pointed in two directions: turn whatever repeats into structure, whichever way the repetition is found.
+
+## A living process, not a library
+
+Scale the ambition up and a different comparison fits better than "framework" or "graph library": this looks like an attempt at artificial life, and it is worth taking that literally rather than as a flourish. A living process is continuous, self-sustaining, self-replicating, and metabolizing — and each of those has a concrete, unmetaphorical meaning here.
+
+**Metabolizing** is already the whole premise: unmetered local compute goes in, structured torch-walks come out. The reframe worth sitting with is what comes out the other end. The code and applications left behind by a run are not the point of the system — they are its waste product. Useful waste, worth collecting, but waste all the same: judged by whether the process kept running well, not by whether any one thing it excreted was good.
+
+The level the metaphor sits at matters, and it's easy to get backwards. **A prophecy is the cell.** The fires burning inside it are its internal machinery — polymerase reading along the genome, ribosomes building proteins — not organisms in their own right. Several fires at once is one cell with a lot going on, not several cells. The graph being walked is the genome. When the last fire goes out the prophecy dies, which is an ordinary ending rather than a failure.
+
+**Self-replicating**, then, is a separate and deliberate event, not something a splitting fire does incidentally. At a mature point in a prophecy — after work has been built and validated — a **kindling torch** looks back at what actually got made and produces the invocation for the next prophecy. The graph survives into the daughter intact; that's heredity. A prophecy that built a rainfall app can notice what it has and propose *also fetch humidity*, and that becomes a daughter walking the same library from the start. Several kindling sites can sit in one graph, so a single prophecy may give rise to many daughters.
+
+For that to be checkable there has to be something older than any individual prophecy's invocation to check against: **the ember**, the founding invocation the whole lineage traces back to. *Does humidity still serve the ember?* is a real question. And the whole multi-generational thing — one ember, one library, every descendant — is **the hearth**. The hearth is what's actually alive; prophecies are its cells.
+
+**Self-sustaining and continuous** is what kindling buys, and it's the condition the system currently fails. Right now the process halts the moment a prophecy resolves and waits for a person to hand it the next invocation. A thing that metabolizes doesn't wait to be fed one meal at a time. Closing that loop is the system consuming its own waste as feedstock for the next cycle rather than a person restarting it each time.
+
+There is an optional evolutionary mode on top of this, off by default: a hearth can fork its own copy of the graph library, have a kindling site produce several competing variants of a graph rather than one daughter, race them in isolation, and keep the winner. The variants are not random mutations — random mutation without population-scale selection is just noise — they're improvements the model itself proposed, which makes each one a hypothesis rather than damage. What it still lacks is a way to say which outcome was actually better, and that gap is load-bearing enough to be written down rather than papered over.
+
+That last piece is also where the danger concentrates. A dynamo that can mint new structure is bounded by its validation gate. A metabolism with no check on whether it's allowed to feed itself again is not bounded by anything — it is a runaway process wearing a nicer name. Whatever decides "does this get to invoke itself once more" is the actual hard problem here, harder than torch-authoring, and it has to be solved before this stops being a metaphor.
+
 ## Status
 
-Framing first. There is no implementation yet — this document is the specification of intent that the code will have to answer to.
+The graph engine, a local UI, and a local-model-driven agent all exist and run end to end — a full walk from invocation to working code, decided entirely by a model running on this machine. Kindling, the dynamo, and evolution mode do not exist yet; they are the specification of intent the code has to answer to next. See [what's built versus what's described](docs/07-implementation.md).
+
+Two things are unsolved in ways that block what comes next, and are worth naming here rather than burying: there is **no fitness signal**, so nothing can yet say which of several outcomes was better — and there is **no governance on self-invocation**, which has to be settled before the loop is closed rather than after. A metabolism with no check on whether it may feed itself again isn't bounded by anything.
 
 ---
 

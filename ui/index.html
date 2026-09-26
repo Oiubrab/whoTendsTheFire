@@ -417,7 +417,12 @@ function render() {
     });
 
     if (isFrontier) {
-      g.addEventListener("click", (ev) => openPicker(n, ev));
+      g.addEventListener("click", (ev) => {
+        // validation torches don't get a choice -- codeOk decides pass/fail,
+        // never the person clicking, so just light it and let the engine resolve it.
+        if (n.kind === "validation") light(n.id, n.options[0]);
+        else openPicker(n, ev);
+      });
     }
   });
 }

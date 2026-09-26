@@ -168,13 +168,22 @@ ensure: {[tid;opt]
     } each rows;
   update status:outcome from rows }
 
+/ a validation torch's pass/fail is not a choice anyone gets to make --
+/ it is the outcome of running its code. Its files/tools are scoped
+/ generically (there is no way to know the outcome before running it to
+/ find out), and the option that actually gets logged and walked is
+/ decided by codeOk once the code has actually run, never by whatever
+/ opt a caller passed in.
 light: {[tid;opt;dest]
   t: torches[tid];
-  toolresult: ensure[tid;opt];
-  filecount: materialize[tid;opt;dest];
+  isValidation: t[`kind]=`validation;
+  useOpt: $[isValidation; `; opt];
+  toolresult: ensure[tid;useOpt];
+  filecount: materialize[tid;useOpt;dest];
   r: $[0 < count t`code; runin[dest;t`code]; (1b;())];
+  finalOpt: $[isValidation; $[first r; `pass; `fail]; opt];
   `torch`option`tools`filesWritten`codeOk`output`next!
-    (tid;opt;toolresult;filecount;first r;last r;walk[tid;opt]) }
+    (tid;finalOpt;toolresult;filecount;first r;last r;walk[tid;finalOpt]) }
 
 / ---- prophecies: the run-level context a torch needs beyond its rite ----
 / a torch's rite alone doesn't carry what's already happened in this run
@@ -240,8 +249,9 @@ lightin: {[pid;tid;opt]
   p: prophecies[pid];
   if[not tid in p`frontier; '"torch not in current frontier"];
   r: light[tid;opt;p`dest];
-  logchoice[pid;tid;opt];
-  nxt: walkable[pid;tid;opt];
+  actual: r`option;
+  logchoice[pid;tid;actual];
+  nxt: walkable[pid;tid;actual];
   `prophecies upsert ([id: enlist pid]
     invocation: enlist p`invocation;
     dest: enlist p`dest;
