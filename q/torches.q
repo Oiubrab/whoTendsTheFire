@@ -206,8 +206,49 @@ materialize: {[tid;opt;dest]
 
 / system signals an 'os error on any nonzero exit -- including a probe
 / that is *supposed* to fail when a tool is missing. attempt traps that
-/ and reports (success;output) instead of crashing the caller.
+/ and reports (success;output) instead of crashing the caller. Kept for
+/ simple one-line probes (command -v, curl -s) where system[]'s
+/ last-line-only return (see capturewrap below) is not a limitation.
 attempt: {[cmd] @[{(1b; system x)}; cmd; {(0b; enlist "ERR: ",x)}]}
+
+/ ---- real output capture ----
+/ system[]'s return value is not what it looks like. For a multi-line
+/ command it is only ever the LAST line -- every earlier line is a
+/ console side-effect during this interactive session and is discarded
+/ from the return value entirely. Confirmed empirically:
+/ `system "echo aaa; echo bbb; echo ccc"` prints aaa and bbb to the
+/ terminal and returns just ,"ccc". Every validation torch's real error
+/ text -- the traceback a repair prompt actually needs to fix anything
+/ -- was being thrown away by this, sandboxed or not, and light[]'s
+/ `output` field was carrying it faithfully into a value nothing ever
+/ surfaced to a model, so the loss went unnoticed until a real repair
+/ loop span on a bug it was never shown.
+/ The fix never relies on system[]'s return value for output at all:
+/ redirect the command's combined stdout+stderr to a file inside the
+/ working directory, run it, then read that file back with q's own
+/ file I/O. The exit code still comes back reliably through system[]'s
+/ one-line capture, because the trailing `echo $?` IS the last line.
+OUTFILE: ".torch-output"
+
+capturewrap: {[cmd] "( ",cmd," ) > ",sqquote[OUTFILE]," 2>&1; echo $?"}
+
+/ reads OUTFILE back from dest and removes it. Every caller of
+/ capturewrap must run it with dest as the working directory (bwrap's
+/ /work is bind-mounted to dest, and runin[] chdirs there directly), so
+/ this always resolves to the same file the command actually wrote.
+/ a LIST of lines, one per element -- read0's own native shape, and the
+/ same shape system[] itself gives back for a single successful command
+/ (tree[] and sources[] depend on this: `2_/:fs` strips a prefix from
+/ EACH path separately, which only makes sense against a list of paths,
+/ not one string with embedded newlines). A joined single string is
+/ only ever wanted at the one place that renders text for a human or a
+/ model to read, and that join happens there, not here.
+readcapture: {[dest]
+  out: @[{read0 hsym `$x}; dest,"/",OUTFILE; {()}];
+  system "rm -f ",sqquote[dest,"/",OUTFILE];
+  out }
+
+parseec: {[line] $[0 < count line; @[{"I"$x}; line; -1]; -1]}
 
 / system "cd X && Y" is not reliable in this build: kdb+ special-cases
 / any command starting with "cd " to change its OWN process directory,
@@ -222,7 +263,15 @@ runin: {[dest;cmd]
   / than invoking a shell, so quotes would become part of the path.
   / That also means there is no shell here to inject into.
   cd: attempt "cd ",dest;
-  r: $[first cd; attempt cmd; cd];
+  / a command string starting with "(" confuses system[] at the q level,
+  / not the shell level -- system "( echo x ) > f; echo $?" throws
+  / "'( invalid" before the OS shell ever sees it, even though the exact
+  / same string works when it is a QUOTED ARGUMENT to an explicit shell
+  / invocation rather than the literal first characters system[] sees.
+  / Routing through `sh -c` sidesteps it.
+  r: $[first cd;
+    [ec: parseec first system "sh -c ",sqquote capturewrap[cmd]; (ec=0; readcapture[dest])];
+    cd];
   system "cd ",cwd;
   r }
 
@@ -233,7 +282,13 @@ runin: {[dest;cmd]
 / there is nothing outside `dest` for a generated script to reach --
 / not the repo, not the db, not ~/.ssh. Verified: a process inside
 / cannot see /mnt/magus, cannot see ~/.ssh, and cannot open a socket.
-HASBWRAP: 0 < count first attempt "command -v bwrap"
+/ `first attempt[...]` is the success flag; `first attempt[...] and ...`
+/ was previously written as `0 < count first attempt[...]`, which reads
+/ the boolean success flag's COUNT (always 1, atoms always count 1) --
+/ HASBWRAP was true unconditionally, on a machine with bwrap or without
+/ it, and a machine genuinely missing bwrap would have tried to exec it
+/ anyway rather than falling back as the design intends.
+HASBWRAP: first attempt "command -v bwrap"
 
 sandboxcmd: {[dest;cmd]
   "bwrap --ro-bind /usr /usr --ro-bind /etc /etc",
@@ -241,14 +296,21 @@ sandboxcmd: {[dest;cmd]
   " --proc /proc --dev /dev --tmpfs /tmp",
   " --bind ",sqquote[dest]," /work --chdir /work",
   " --unshare-all --die-with-parent --new-session",
-  " /bin/sh -c ",sqquote[cmd] }
+  " /bin/sh -c ",sqquote[capturewrap[cmd]] }
 
 / run a command with the host sealed off. Falls back to running in the
 / open only if bwrap is genuinely absent, and says so in the output
-/ rather than pretending it was contained.
+/ rather than pretending it was contained. Wrapped in @[] rather than
+/ trusting system[] not to throw: a bwrap-level failure (missing binary,
+/ a bind mount rejected) happens before the inner shell -- and therefore
+/ before capturewrap's OWN trailing echo -- ever runs, so system[] can
+/ still raise its generic 'os here even though every OTHER path through
+/ this function has been rebuilt specifically to avoid that.
+sandboxedinner: {[dest;cmd] ec: parseec first system sandboxcmd[dest;cmd]; (ec=0; readcapture[dest])}
+
 sandboxed: {[dest;cmd]
   $[HASBWRAP;
-    attempt sandboxcmd[dest;cmd];
+    @[{sandboxedinner . x}; (dest;cmd); {(0b; enlist "ERR: ",x)}];
     [r: runin[dest;cmd]; (first r; (enlist "WARNING: bwrap absent, ran unsandboxed"),last r)]] }
 
 ensure: {[tid;opt]
@@ -270,7 +332,17 @@ ensure: {[tid;opt]
 / model-authored. It runs sealed unless someone deliberately opts out.
 SANDBOX: 1b
 
-light: {[tid;opt;dest]
+/ lib/g are which library and which graph this is being walked as --
+/ walk[] has been graph-scoped since the library/graph split (the same
+/ two torches can be wired differently in different graphs), so `next`
+/ needs both to look up an edge at all. This was missing entirely: the
+/ call below used to be walk[tid;finalOpt], a 2-arg call against a
+/ 4-arg function, which q accepts silently as a PARTIAL APPLICATION --
+/ `next` held an uncalled, curried function value rather than a result,
+/ and the very first `finalOpt` (from choose.surface, before any
+/ scaffolding) hit code trying to treat that function as data and threw
+/ a bare 'type with nothing else to say why.
+light: {[tid;opt;dest;lib;g]
   t: torches[tid];
   isValidation: t[`kind]=`validation;
   useOpt: $[isValidation; `; opt];
@@ -279,7 +351,7 @@ light: {[tid;opt;dest]
   r: $[0 < count t`code; $[SANDBOX; sandboxed[dest;t`code]; runin[dest;t`code]]; (1b;())];
   finalOpt: $[isValidation; $[first r; `pass; `fail]; opt];
   `torch`option`tools`filesWritten`codeOk`output`next!
-    (tid;finalOpt;toolresult;filecount;first r;last r;walk[tid;finalOpt]) }
+    (tid;finalOpt;toolresult;filecount;first r;last r;walk[lib;g;tid;finalOpt]) }
 
 / ---- authoring ----
 / The one place the model produces an artifact rather than picking from
@@ -348,59 +420,15 @@ prophecies: ([id:`symbol$()]
 
 chronicle: ([] prophecy:`symbol$(); seq:`long$(); torch:`symbol$(); option:`symbol$(); ts:`timestamp$())
 
-/ ---- prophecies: the run-level context a torch needs beyond its rite ----
-/ a torch's rite alone doesn't carry what's already happened in this run
-/ or what the working directory looks like. A prophecy is the run: it
-/ pins the invocation and the working directory, `chronicle` is the
-/ trail of torches already lit within it, and `tree` is a plain listing
-/ of what's actually on disk right now. `brief` bundles all of that into
-/ what a model call at a torch actually needs; `lightin` lights a torch
-/ inside a named prophecy and appends it to the trail automatically.
-
-/ 'frontier' is the set of torches currently available to be lit -- it
-/ starts as the graph's root torches (no incoming edge) and after each
-/ light[] loses the torch just lit and gains whatever it walkably leads
-/ to. More than one entry at once is normal, not an edge case: multiple
-/ disconnected roots, or a model lighting more than one torch from the
-/ same position, both just mean several torches are lit at once.
-/ a hearth is the whole multi-generational process: one ember (the
-/ founding invocation every descendant traces back to), one library,
-/ and every prophecy descended from the first. The hearth is the thing
-/ that is actually alive; prophecies are its cells. The ceilings are
-/ not optional extras -- a metabolism with no check on whether it may
-/ feed itself again is bounded by nothing, so kindling refuses once a
-/ hearth is out of budget. autokindle off means a person approves each
-/ generation; on means the loop runs itself until a ceiling stops it.
-/ a hearth runs continuously by default. Cell division does not stop
-/ at generation five, and neither should this -- what actually stops a
-/ living process is running out of something, or being killed, or
-/ failing. So the brakes here are resources and signals, not a counter:
-/   diskcap  bytes the hearth's runs may occupy (0 = unlimited)
-/   maxproph total prophecies (0 = unlimited, the default)
-/   halt     a kill-switch path; if that file exists, kindling stops
-/ plus the two that were always there and are the real regulators: the
-/ model declining to propose anything, and a prophecy that fails
-/ validation never reaching its kindling torch at all.
-hearths: ([id:`symbol$()]
-  ember: ();               / the founding invocation
-  evolution: `boolean$();  / breed competing graph variants
-  lib: `symbol$();         / which library this hearth walks
-  diskcap: `long$();       / bytes across the hearth's runs, 0 = unlimited
-  maxproph: `long$();      / 0 = unlimited
-  halt: ();                / kill-switch file path
-  born: `timestamp$() )
-
-prophecies: ([id:`symbol$()]
-  hearth: `symbol$();      / which hearth this cell belongs to
-  lib: `symbol$();         / which library it walks -- a candidate copy during a race
-  parent: `symbol$();      / the prophecy that kindled it, ` for the first
-  generation: `long$();
-  graph: `symbol$();       / which graph from the library it walks
-  invocation: ();
-  dest: ();
-  frontier: () )
-
-chronicle: ([] prophecy:`symbol$(); seq:`long$(); torch:`symbol$(); option:`symbol$(); ts:`timestamp$())
+/ the real text of the most recent validation this prophecy ran, keyed by
+/ prophecy so it survives across the per-call q process boundary the
+/ bridge actually uses. Without this an authoring/repair torch was asked
+/ to fix something knowing only "verify.api -> fail" from the chronicle
+/ -- the actual traceback that light[] captures (see capturewrap) was
+/ computed and then handed to nobody. A three-attempt repair loop that
+/ never converges because the model is guessing blind looks identical,
+/ from outside, to a model that is bad at the task; it was neither.
+laststatus: ([prophecy:`symbol$()] torch:`symbol$(); option:`symbol$(); output:())
 
 / declared, not inferred. Inferring "no inbound edge" meant a mutation
 / that orphaned a torch silently promoted it to an entry point -- the
@@ -533,11 +561,24 @@ sources: {[dest]
      running: sums count each last each rows;
      rows where running <= SRCCAP] ] }
 
+/ the most recent validation this prophecy ran, or nulls if none yet.
+/ Capped independently of SRCCAP -- a traceback is exactly the kind of
+/ thing worth spending budget on, but an unbounded one from a runaway
+/ script would still blow out the brief.
+CHECKCAP: 3000
+
+lastcheck: {[pid]
+  row: @[{first 0!select torch,option,output from laststatus where prophecy=x};
+         pid; {`torch`option`output!(`;`;"")}];
+  out: row`output;
+  row: @[row; `output; :; $[CHECKCAP < count out; (CHECKCAP#out),"\n... (truncated)"; out]] }
+
 brief: {[pid;tid]
   p: prophecies[pid];
   trail: 0!select seq,torch,option from chronicle where prophecy=pid;
-  `invocation`rite`trail`tree`capabilities`sources!
-    (p`invocation; torches[tid]`rite; trail; tree p`dest; capabilities[pid]; sources p`dest) }
+  `invocation`rite`trail`tree`capabilities`sources`lastcheck!
+    (p`invocation; torches[tid]`rite; trail; tree p`dest; capabilities[pid];
+     sources p`dest; lastcheck[pid]) }
 
 briefText: {[pid;tid]
   b: brief[pid;tid];
@@ -548,18 +589,36 @@ briefText: {[pid;tid]
   capLines: $[0=count b`capabilities; enlist "  (none yet)"; "  ",/:string b`capabilities];
   srcLines: $[0 = count b`sources; enlist "  (nothing written yet)";
     raze {[e] (enlist "  --- ",first e),("    ",/:"\n" vs last e)} each b`sources];
+  / only shown once something has actually been checked -- an empty
+  / section here would be noise on the very first torch of a prophecy.
+  lc: b`lastcheck;
+  checkLines: $[lc[`torch] ~ `;
+    ();
+    ("";"LAST CHECK: ",string[lc`torch]," -> ",string lc`option),
+      ("    ",/:"\n" vs lc`output)];
   lines: ("INVOCATION:"; "  ",b`invocation; ""; "RITE:"; "  ",b`rite; "";
     "TORCHES LIT SO FAR:"),trailLines,(""; "CAPABILITIES SO FAR:"),capLines,
     (""; "CURRENT CODEBASE:"),treeLines,
-    (""; "WHAT THE CODE CURRENTLY CONTAINS:"),srcLines;
+    (""; "WHAT THE CODE CURRENTLY CONTAINS:"),srcLines,checkLines;
   "\n" sv lines }
 
 lightin: {[pid;tid;opt]
   p: prophecies[pid];
   if[not tid in p`frontier; '"torch not in current frontier"];
-  r: light[tid;opt;p`dest];
+  r: light[tid;opt;p`dest;p`lib;p`graph];
   actual: r`option;
   logchoice[pid;tid;actual];
+  / record the real captured output of every validation this prophecy
+  / runs, keyed by prophecy, overwriting the previous one. A brief built
+  / for whatever torch comes next can now show what actually happened,
+  / rather than the trail's bare "torch -> fail".
+  / named rather than inlined as torches[tid]`kind = `validation: q has
+  / no operator precedence and evaluates right to left, so that reads as
+  / torches[tid][`kind = `validation] -- index torches[tid] by a BOOLEAN
+  / -- not as (torches[tid]`kind) = `validation. It throws a bare 'type
+  / with no other clue, on the very first torch of every single walk.
+  isValidationTorch: torches[tid][`kind] = `validation;
+  if[isValidationTorch; `laststatus upsert (pid;tid;actual;"\n" sv r`output)];
   nxt: walkable[pid;tid;actual];
   nf: distinct (p[`frontier] except tid),nxt;
   update frontier: enlist nf from `prophecies where id=pid;
@@ -808,9 +867,15 @@ race: {[hid;g;muts;scratch]
 savedb: {[]
   `:db/hearths set hearths;
   `:db/prophecies set prophecies;
-  `:db/chronicle set chronicle; }
+  `:db/chronicle set chronicle;
+  `:db/laststatus set laststatus; }
 
 loaddb: {[]
   hearths::get `:db/hearths;
   prophecies::get `:db/prophecies;
-  chronicle::get `:db/chronicle; }
+  chronicle::get `:db/chronicle;
+  / guarded: a db/ written before laststatus existed has no file for it.
+  / Falling back to the fresh empty table declared above, rather than
+  / letting a missing file crash every single boot of an existing hearth.
+  laststatus::@[{get `:db/laststatus}; ::;
+    {([prophecy:`symbol$()] torch:`symbol$(); option:`symbol$(); output:())}]; }
