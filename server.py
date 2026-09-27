@@ -499,7 +499,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # lights a hearth: the founding invocation becomes the ember,
                 # and the first prophecy is its first cell.
                 invocation = body.get("invocation", "")
-                graph = body.get("graph", "g.pycli")
+                # g.pycli was the founding graph of the old 12-torch library
+                # and no longer exists at all -- a UI "begin" click with no
+                # explicit graph (the normal case) silently asked to walk a
+                # graph that is not in the seed, got an empty frontier back,
+                # and the prophecy ended after zero steps with no error.
+                graph = body.get("graph", "g.found")
                 evolution = bool(body.get("evolution", False))
                 hid = "h" + secrets.token_hex(4)
                 pid = "p" + secrets.token_hex(4)
@@ -547,24 +552,62 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     pick = next((o for o in opts if o.lower() in reply.lower()), opts[0])
                     self._send_json({"option": pick, "asked": True, "said": reply[:200]})
             elif parsed.path == "/api/propose":
-                # the model proposes the daughter's invocation
+                # the model proposes BOTH which arrangement the daughter
+                # walks and its invocation, in one call -- kindle.next's
+                # own options ARE the library's graph ids, so the menu is
+                # the library index and cannot drift out of step with it.
+                # Mirrors agent.py's propose_kindling exactly: same two
+                # things asked, same two-line reply format, same
+                # offerable-filtering so a lineage that chose json
+                # storage is never offered a graph whose root torch
+                # needs sqlite.
                 pid, tid = body["pid"], body["torch"]
                 brief = run_q(f"res: briefText[{qsym(pid)};{qsym(tid)}]")
                 st = run_q(f"res: state[{qsym(pid)}]")
-                rite = run_q(f"res: torches[{qsym(tid)}]`rite")
-                prompt = (f"{brief}\n\nTHE EMBER (what this lineage serves):\n  {st['ember']}\n\n"
-                          f"{rite}\n\n"
-                          "Reply with ONE sentence naming the single next thing to build, nothing else.\n"
-                          "If nothing worthwhile remains, reply exactly: DECLINE\n\nNext:")
-                reply = ask_model(prompt, num_predict=800)
-                if not reply:
+                t = run_q(f"res: `rite`options!(torches[{qsym(tid)}]`rite; torches[{qsym(tid)}]`options)")
+                options = [o for o in t["options"] if o and o != "decline"]
+                offerable = set(st.get("offerable") or [])
+                if offerable:
+                    kept = [o for o in options if o in offerable]
+                    if kept:
+                        options = kept
+                prompt = (
+                    f"{brief}\n\nTHE EMBER (what this lineage serves):\n  {st['ember']}\n\n"
+                    f"{t['rite']}\n\n"
+                    "Reply with EXACTLY two lines and nothing else:\n"
+                    "GRAPH: <one of " + ", ".join(options) + ">\n"
+                    "NEXT: <one sentence naming the single thing to build>\n\n"
+                    "If nothing worthwhile remains, or the next step would not serve the ember,\n"
+                    "reply with exactly: DECLINE\n"
+                )
+                reply = ask_model(prompt, num_predict=900)
+                if not reply or ("DECLINE" in reply.upper() and "GRAPH:" not in reply.upper()):
                     self._send_json({"decline": True})
                 else:
-                    line = next((l.strip() for l in reply.splitlines() if l.strip()), "")
-                    if not line or line.upper().startswith("DECLINE") or "<|" in line or len(line) < 10:
+                    chosen_graph, invocation = None, None
+                    for line in reply.splitlines():
+                        line = line.strip()
+                        up = line.upper()
+                        if up.startswith("GRAPH:"):
+                            said = line.split(":", 1)[1].strip().strip("`\"'")
+                            for opt in sorted(options, key=len, reverse=True):
+                                if opt in said:
+                                    chosen_graph = opt
+                                    break
+                        elif up.startswith("NEXT:"):
+                            invocation = line.split(":", 1)[1].strip().strip('"').strip()
+                    if invocation is None:
+                        for line in reply.splitlines():
+                            t2 = line.strip()
+                            if t2 and not t2.upper().startswith("GRAPH:") and len(t2) >= 10:
+                                invocation = t2.strip('"').strip()
+                                break
+                    if not invocation or "<|" in invocation or len(invocation) < 10:
                         self._send_json({"decline": True})
                     else:
-                        self._send_json({"invocation": line.strip('"').strip()})
+                        if chosen_graph is None:
+                            chosen_graph = "g.harden" if "g.harden" in options else options[0]
+                        self._send_json({"invocation": invocation, "graph": chosen_graph})
             elif parsed.path == "/api/authorize":
                 # The torch declares its target. A target ending in "/" means
                 # "a new module in this directory" -- each generation writes

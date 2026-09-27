@@ -519,13 +519,24 @@ async function kindleFrom(node) {
   // a kindling torch asks what to build next, then spawns a daughter
   // prophecy and moves the view into it. The engine refuses if the
   // hearth is out of budget, and that refusal surfaces as a toast.
+  // node.graph is not reliable here -- kindle.next belongs to 7
+  // different graphs, and a human driving this manually (no model call
+  // to ask) needs to pick one explicitly rather than get whichever one
+  // the layout happened to resolve first.
+  const offerable = (currentState && currentState.offerable || []).filter(g => g !== "g.found");
+  const menu = offerable.length ? offerable : (graph.nodes.length ? [node.graph] : []);
+  const graphChoice = prompt(
+    `Which arrangement should the daughter walk?\n${menu.join(", ")}`,
+    menu[0] || node.graph);
+  if (graphChoice === null) return;
+  const chosenGraph = menu.includes(graphChoice.trim()) ? graphChoice.trim() : menu[0];
   const proposed = prompt(node.rite || "What should the next prophecy build?");
   if (proposed === null) return;
   const invocation = proposed.trim();
   if (!invocation) { await light(node.id, "decline"); return; }
   try {
-    const spawned = await api("POST", "/api/kindle", { pid, invocation, graph: node.graph });
-    await light(node.id, "spawn");
+    const spawned = await api("POST", "/api/kindle", { pid, invocation, graph: chosenGraph });
+    await light(node.id, chosenGraph);
     pid = spawned.pid;
     currentState = spawned.state;
     updateSidebar();
@@ -585,10 +596,15 @@ async function autoRun() {
           await light(id, "decline");
           break;
         }
-        status(`kindling: ${p.invocation}`, true);
+        // kindle.next's options ARE the library's graph ids (g.feature,
+        // g.route, ...), not a generic "spawn" -- that was the old
+        // two-graph library's shape. Lighting it with whatever the model
+        // actually chose keeps the chronicle an honest record of what
+        // happened, rather than an option that no longer exists.
+        status(`kindling ${p.graph}: ${p.invocation}`, true);
         const spawned = await api("POST", "/api/kindle",
-          { pid, invocation: p.invocation, graph: node.graph });
-        await light(id, "spawn");
+          { pid, invocation: p.invocation, graph: p.graph });
+        await light(id, p.graph);
         pid = spawned.pid;
         currentState = spawned.state;
         updateSidebar();
