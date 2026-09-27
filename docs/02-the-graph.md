@@ -90,17 +90,32 @@ This is distinct from `toolreqs`, and the distinction is load-bearing:
 
 A **graph** is a named, reusable arrangement of torches for a class of work — not the whole torch universe. The **library** is the collection of them.
 
-This layer does not exist in the current implementation, which has a single flat torch table. It is required by [evolution mode](05-evolution.md), which forks a library and mutates individual graphs within it, and it is generally useful: a prophecy should select the graph that fits its invocation rather than navigating one enormous undifferentiated graph.
+Implemented: `graphs`, `members` and a graph-scoped `edges` table, with
+`members` many-to-many so one torch appears in any number of graphs without
+being duplicated. `verify.compile` is a member of eight graphs — the same
+torch, not eight copies. That is the whole reason the two tables are separate.
 
-Likely shape of a library, by the categories a real build needs:
+The seeded library is 46 torches in 8 graphs, described in
+[07](07-implementation.md). Against the categories this document originally
+predicted:
 
-- api graphs (talk to an external service) and an internet-access graph they depend on
-- backend graphs
-- frontend graphs
-- database graphs
-- integration graphs (wire new work into an existing codebase)
+- **backend** — `g.route`, over a stdlib HTTP dispatcher
+- **frontend** — `g.view`, over a shell that discovers its own views
+- **database** — `g.schema`, migrations applied in filename order
+- **composite** — `g.fullstack`, a table with endpoints and a page
+- **founding** — `g.found`, which installs everything the others assume
+- **inward** — `g.harden` and `g.document`, which add no behaviour at all
 
-**Open:** whether "integration" is a separate category at all, or whether every torch should be written brownfield — assuming an existing codebase and extending it — which would collapse the distinction. See [06](06-open-problems.md).
+**Resolved:** integration is *not* a separate category. Every torch is written
+brownfield — it assumes an existing codebase and extends it — which collapses
+the distinction exactly as this document guessed it might. A feature module, a
+route module and a view are all one new file plus a dispatcher that discovers
+it, so there is nothing left for an integration torch to do.
+
+**api graphs and an internet-access graph are still absent**, and deliberately
+so: the sandbox has no network, so nothing inside it can reach an external
+service or install a dependency. That is a real limit on what this library can
+build, not an oversight.
 
 ## Current schema
 
@@ -134,5 +149,7 @@ Things that must remain true. A change that breaks one of these is a bug regardl
 1. **The engine never interprets a torch.** It dispatches on `kind` and nothing else. Any behaviour specific to a particular torch lives in that torch's data.
 2. **A model's return value is validated against the torch's contract before it is acted on.** A decision torch's answer must be one of the options offered.
 3. **A validation torch's outcome is derived from what its check actually returned.** It is never supplied by a caller, a model, or a person clicking a button.
-4. **Capability gating is applied at offer time, not at execution time.** A torch whose requirements are unmet is never presented as a live option.
-5. **Extension is new rows, not new engine code.**
+4. **Capability gating is applied at offer time, not at execution time.** A torch whose requirements are unmet is never presented as a live option. This extends to the kindling menu: `offerable[pid]` is the set of graphs whose root torch the lineage's inherited capabilities permit, and a graph outside it is never offered, because choosing it would produce a daughter whose first torch can never light.
+
+5. **Capabilities are inherited down the lineage, not scoped to one prophecy.** A choice made at generation 1 is still in force at generation 40. Scoping them per-prophecy would make every daughter re-decide what its lineage settled long ago, which is exactly the re-deciding the ratchet exists to stop.
+6. **Extension is new rows, not new engine code.**

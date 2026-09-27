@@ -60,8 +60,35 @@ So a model call also receives **the brief**:
 - **the chronicle** — every torch lit so far in this prophecy, in order, with the option taken
 - **capabilities** — what earlier choices have granted
 - **the tree** — a plain recursive listing of the working directory as it stands right now
+- **the sources** — the contents of what previous generations *authored*, and deliberately nothing else
 
 The tree is what lets a torch make placement decisions. "Where does this new script belong" is answerable if you can see the shape of the codebase and unanswerable if you can't.
+
+### What the sources deliberately exclude
+
+Three exclusions, each of which was a real failure first:
+
+- **The scaffold.** Every path any torch writes in `once` mode — the
+  dispatchers, the shared modules, the tool scripts. Handing these back costs
+  tens of thousands of tokens and invites the model to "fix" machinery it must
+  never touch. Derived from the `files` table rather than listed separately,
+  so adding a scaffold torch cannot forget to register its output.
+- **Binary and data files.** An allowlist of text extensions, not a denylist.
+  The first database-backed generation put `app.db` in the working directory,
+  `read0` turned it into raw control bytes, and the JSON encoder returned a
+  500 that killed the walk at step five. A denylist would have had to predict
+  that; an allowlist did not.
+- **Anything past a total budget.** `SRCCAP` caps the sum across all files,
+  not each file. Without a *total*, cost per generation grows with the size of
+  the codebase, which is the hard ceiling on how long a lineage can run. The
+  newest work is kept when the budget runs out.
+
+What remains is what previous generations wrote, plus `SURVEY.txt` — an
+inventory a `survey.run` torch derived from the syntax tree. That file is how
+the executive decisions get their overview, and no model is involved in
+producing it. It lands on disk as an ordinary authored artifact rather than
+being injected by the engine, because [02](02-the-graph.md)'s last invariant
+says extension is new rows, not new engine code.
 
 The chronicle entries are deliberately terse — torch id and option taken, not a transcript. The model does not need to re-read its own reasoning from four torches ago; it needs to know what was decided.
 

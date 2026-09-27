@@ -53,9 +53,30 @@ What it receives:
 - **this prophecy's invocation** — what this particular cell was for
 - **the chronicle and the tree** — what was actually built, and what state it left behind
 
-What it produces: the invocation for a daughter prophecy, which then walks the library from the start under its own fire.
+What it produces: two things, both narrow.
+
+1. **Which arrangement the daughter walks.** The kindling torch's `options`
+   *are* the library's graph ids, so the menu is the library index and cannot
+   drift out of step with it. The menu is then narrowed by `offerable` — the
+   graphs whose root torch this lineage's inherited capabilities permit — so a
+   lineage that chose JSON storage is never offered the schema graph.
+2. **The invocation** the daughter carries, in one sentence.
+
+That is the entire executive call, and it is deliberately as rigid as every
+other torch in the library. The model does not choose where the daughter
+works, what torches exist, how they are wired, or whether its own output was
+acceptable. The overview it answers from is `SURVEY.txt`, derived from the code
+by a script — so even the context for this call is law rather than narration.
 
 The worked example: a prophecy builds a rainfall app. Near its end, a kindling torch observes what exists, checks it against the ember, and proposes *also fetch humidity*. That becomes a daughter prophecy, which selects the graphs it needs — an API graph, an internet-access graph, a database graph, whatever integration the existing codebase requires — and builds.
+
+An observed run of exactly this shape, five generations, entirely unattended:
+`g.found` installs the project and chooses sqlite and both surfaces;
+`g.feature` adds a subcommand; `g.schema` adds a table via a migration that
+sqlite applies and the checker reads back; `g.harden` spends a whole
+generation on seven deterministic checks and **no authoring calls at all**;
+`g.document` regenerates the docs and declines to continue. Each generation
+left a git commit and a fresh `SURVEY.txt` for the next one to read.
 
 ### Several kindling sites
 
@@ -100,6 +121,14 @@ Against the four conditions:
 
 - **Metabolizing** — yes. Compute in, work out, waste behind.
 - **Self-replicating** — yes, via kindling. Implemented.
-- **Continuous / self-sustaining** — implemented, and deliberately fenced. A hearth with `autokindle` on runs generation after generation unattended; the ceilings (`maxgen`, `maxproph`) are what stop it, and `kindle` refuses rather than warns when one is hit. `autokindle` is off by default, meaning a person approves each generation unless they explicitly say otherwise.
+- **Continuous / self-sustaining** — implemented, and deliberately fenced. The
+  agent runs generation after generation with no human input and no generation
+  counter; what stops it is the model declining, a disk cap, a prophecy
+  ceiling, or a `HALT` file appearing. `kindle` refuses rather than warns when
+  one is hit.
+- **Heritable** — yes, and across generations rather than within one. A choice
+  made by the founding prophecy still gates which torches the fortieth
+  generation is offered, because capabilities are read from the whole ancestry
+  rather than one prophecy's chronicle.
 
 And the honest warning, which belongs here rather than buried in a footnote: **a dynamo is bounded by its validation gate; a metabolism with no check on whether it may feed itself again is bounded by nothing.** The ceilings implemented today are a crude answer to that — they stop a runaway by counting, not by judging. They are enough to make the loop safe to run on a desktop and nowhere near enough to make it trustworthy at scale. What *should* decide whether a hearth has earned another generation is still open. See [06](06-open-problems.md).

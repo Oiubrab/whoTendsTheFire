@@ -25,14 +25,86 @@ The trajectory is the model's own, each step checked against the ember.
 ## What's not
 
 - **The dynamo.** No torch mints new torches. The graph is entirely human-authored.
-- **Evolution mode.** No local library fork, no candidates, no races, no selection. Blocked on the fitness function ([06](06-open-problems.md)).
-- **Real failure routing.** One `fail` edge, which ends the prophecy.
-- **Any sandboxing.** Torch code runs directly on the host as the invoking user. This is the thing that most needs fixing before the dynamo is turned on.
-- **A daughter that walks a *different* graph.** Kindling can target any graph, but nothing yet chooses one from the invocation — the agent passes the same graph through.
+- **Evolution proven.** The fork, the race and the selection are implemented
+  and run, but no mutation has yet survived selection on a real run.
+- **The dynamo.** No torch mints new torches. All 46 are human-authored.
+- **Judgement of quality.** Every gate asks "does it run", never "is it any
+  good". A feature that runs and whose own test agrees with it passes, and
+  nothing notices that it is useless. This is the largest remaining gap.
+- **A supervisor.** If the agent process dies mid-lineage there is no resume;
+  the hearth's state is on disk but nothing picks it back up.
 
-### A caveat about the seeded library
+## The library
 
-The library is two graphs and eight torches. Every prophecy in the run above walked the same five torches, because that is all there is — the daughters' invocations were good but the library has nothing that could act on "add a web server" differently from "add a sensor reader." The loop is real; the vocabulary it walks is a toy. Growing that is what the dynamo is for.
+46 torches and 8 graphs, seeded in `q/library.q` from boilerplate that lives
+as real files under `assets/`. Not string literals in a q file: a 200-line
+dispatcher embedded as an escaped q string cannot be run, linted or tested,
+and every earlier version of this project that inlined its scaffold shipped
+scaffold that did not work.
+
+The distribution is the point:
+
+| Kind | Count | Who acts |
+|------|------:|----------|
+| `action` | 18 | nobody — deterministic code |
+| `validation` | 12 | nobody — a check, and the exit status decides |
+| `authoring` | 12 | the model writes one file against a stated contract |
+| `decision` | 3 | the model picks one option from a closed menu |
+| `kindling` | 1 | the model picks an arrangement and writes one sentence |
+
+**30 of 46 torches consult no model at all.** That is the ratio principle 5
+asks for: a model call is a debt, and the deterministic work is already
+written. The scripts in `assets/tools/` are where it went — `survey.py`
+derives an inventory from the syntax tree, `tidy.py` removes unused imports,
+`docgen.py` writes the documentation by running the program, `smoke.py`
+starts the server and hits every declared route, `schemacheck.py` applies
+migrations and reads the schema back, `webcheck.py` balances tags and
+brackets, `packagecheck.py` resolves the console entry point.
+
+### The arrangements
+
+| Graph | What it does | Authoring torches |
+|---|---|--:|
+| `g.found` | Pick surface, storage and licence; install everything that follows | 0 |
+| `g.feature` | One new command-line subcommand | 3 |
+| `g.route` | One new group of HTTP endpoints | 2 |
+| `g.view` | One new page in the browser front end | 1 |
+| `g.schema` | One new database table, via a migration | 1 |
+| `g.fullstack` | A table, the endpoints over it, and the page that shows it | 4 |
+| `g.harden` | No new behaviour: tidy, recompile, re-verify, re-document | 0 |
+| `g.document` | Regenerate derived docs and check packaging | 0 |
+
+`g.harden` and `g.document` have no authoring torches whatsoever. A
+generation that walks one of them spends itself getting strictly better at
+what the app already does, and the only model call in it is choosing what
+comes next.
+
+### What the model is actually asked
+
+Three things, and nothing else:
+
+1. **Pick one option from a menu** — which surface, which storage, which
+   licence. Each option writes a different file or grants a different
+   capability, so a choice always has consequences ([02](02-the-graph.md)).
+2. **Write one file against a contract** — one feature module, one route
+   module, one view, one migration, one test. The torch declares the target
+   path, output that does not parse is refused rather than written, and a
+   validation torch runs over the result regardless.
+3. **Pick an arrangement and write one sentence** — at the kindling torch.
+   Its options *are* the library's graph ids, so the menu cannot drift out of
+   step with the library, and the menu is filtered by `offerable` so a
+   lineage that chose JSON storage is never offered `g.schema`.
+
+### The library checks itself
+
+`libcheck[]` asserts the library's own shape, and `selftest.sh` runs it on
+every change. A graph is data, and malformed data here does not raise — it
+silently produces a lineage that cannot reproduce, which has happened twice
+in this project. It verifies that every declared root really is a root, that
+no edge points at a non-member, that every declared option is wired and
+nothing undeclared is, that every graph can reach a kindling torch, that
+every authoring torch declares a target, and that every decision torch's
+options have consequences.
 
 ## Running it
 
@@ -45,9 +117,23 @@ python3 server.py 8420     # then open http://127.0.0.1:8420
 **The agent** (requires the bridge running, and Ollama up with `torch-gpt-oss`):
 
 ```sh
-python3 agent.py "a weather station I can run at home" --generations 3
-python3 agent.py "..." --brownfield     # daughters extend the parent's directory
-python3 agent.py "..." --graph g.langpick
+# runs until the model declines or a hearth ceiling stops it
+python3 agent.py "a weather station I can run at home"
+
+python3 agent.py "..." --generations 5   # stop after five prophecies
+python3 agent.py "..." --fresh-dirs      # daughters build alongside, not in place
+python3 agent.py "..." --evolve          # breed graph variants at each kindling site
+```
+
+**The fast test** — the whole pipeline end to end with a canned model, in
+seconds rather than the forty minutes a real run takes:
+
+```sh
+bash selftest.sh                  # 27 assertions
+sh q/lint.sh                      # the one q landmine that voids a file silently
+
+# aim a canned run at specific arrangements
+FAKE_MODEL=1 FAKE_KINDLES="g.fullstack,g.route" python3 agent.py "..." 
 ```
 
 **The engine alone:**

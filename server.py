@@ -99,17 +99,24 @@ MODEL = "torch-gpt-oss"
 # minutes, which is the difference between catching those before they
 # ship and finding them three layers downstream.
 FAKE_MODEL = os.environ.get("FAKE_MODEL") == "1"
+NUM_CTX = int(os.environ.get("NUM_CTX", "32768"))
 
-FAKE_FEATURE = '''from features import store
+# Deliberately free of any storage import. Which store exists is a
+# decision the lineage makes at choose.storage, and a canned feature that
+# assumed one of them turned a storage choice into a test failure.
+FAKE_FEATURE = '''"""Count the rows in the CSV fixture."""
+import csv
+import pathlib
 
 
 def register(sub):
-    p = sub.add_parser("count", help="Count stored rows")
+    p = sub.add_parser("count", help="Count rows in sample.csv")
     p.set_defaults(func=run)
 
 
 def run(args):
-    rows = store.load()
+    path = pathlib.Path(__file__).resolve().parent.parent / "sample.csv"
+    rows = list(csv.DictReader(path.open())) if path.exists() else []
     print("rows: %d" % len(rows))
 '''
 
@@ -124,6 +131,58 @@ esac
 '''
 
 
+FAKE_ROUTE = """from app import db, errors
+
+
+def register(routes):
+    routes.add("GET", "/api/thing%(n)s", list_things)
+    routes.add("POST", "/api/thing%(n)s", make_thing)
+
+
+def list_things(req):
+    try:
+        return {"things": db.query("select * from thing order by id limit 50")}
+    except Exception:
+        return {"things": []}
+
+
+def make_thing(req):
+    name = (req.json().get("name") or "").strip()
+    if not name:
+        raise errors.Invalid("name is required")
+    return 201, {"name": name}
+"""
+
+FAKE_VIEW = """App.view("Thing%(n)s", function (main) {
+  main.appendChild(App.el("p", { text: "things from the api" }));
+  return App.api("/api/thing%(n)s").then(function (d) {
+    main.appendChild(App.table(d.things || []));
+    App.status("loaded");
+  });
+});
+"""
+
+FAKE_MIGRATION = """create table thing%(n)s (
+  id integer primary key autoincrement,
+  name text not null,
+  created_at text default current_timestamp
+);
+"""
+
+FAKE_APITEST = """#!/bin/sh
+python3 serve.py --port 8071 >/dev/null 2>&1 &
+SRV=$!
+i=0
+while [ $i -lt 40 ]; do
+  python3 -c "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1',8071))==0 else 1)" && break
+  i=$((i+1))
+  sleep 0.2
+done
+out=$(python3 -c "import urllib.request,json; print(json.load(urllib.request.urlopen('http://127.0.0.1:8071/api/health'))['ok'])")
+kill $SRV
+[ "$out" = "True" ] || { echo "health check failed: $out"; exit 1; }
+"""
+
 FAKE_KINDLES = []
 
 
@@ -136,21 +195,34 @@ def fake_answer(prompt, target=None):
     current source, so every prompt contains "register(sub)" and matching
     on content returned Python for the .sh targets."""
     if target:
-        if target.endswith(".py"):
-            m = _re.search(r"gen(\d+)", target)
-            name = "count%s" % (m.group(1) if m else "1")
-            return FAKE_FEATURE.replace('"count"', '"%s"' % name)
+        m = _re.search(r"(\d+)", os.path.basename(target))
+        n = m.group(1) if m else "1"
+        # most specific first: tests/ before .sh, api/ before .py
+        if target.startswith("tests/api"):
+            return FAKE_APITEST
         if target.startswith("tests/"):
-            m = _re.search(r"gen(\d+)", target)
-            name = "count%s" % (m.group(1) if m else "1")
-            return FAKE_TEST.replace("cli.py count", "cli.py %s" % name)
+            return FAKE_TEST.replace("cli.py count", "cli.py count%s" % n)
+        if target.startswith("api/"):
+            return FAKE_ROUTE % {"n": n}
+        if target.startswith("web/views/"):
+            return FAKE_VIEW % {"n": n}
+        if target.endswith(".sql"):
+            return FAKE_MIGRATION % {"n": n}
+        if target.endswith(".py"):
+            return FAKE_FEATURE.replace('"count"', '"count%s"' % n)
         if target.endswith(".sh"):
             return FAKE_DEMO
-    if "next thing to build" in prompt or "next subcommand" in prompt or "next capability" in prompt:
+    # the kindling call: two lines, a graph and a sentence, same as the
+    # real model is asked for. Cycling the graphs is deliberate -- a
+    # harness that only ever exercises one arrangement proves nothing
+    # about the other seven.
+    if "GRAPH:" in prompt:
         FAKE_KINDLES.append(1)
-        # let the harness reach three generations, then stop cleanly
-        return ("DECLINE" if len(FAKE_KINDLES) >= 3
-                else "Add a subcommand that reports the newest row.")
+        order = ["g.feature", "g.harden", "g.document"]
+        i = len(FAKE_KINDLES) - 1
+        if i >= len(order):
+            return "DECLINE"
+        return "GRAPH: %s\nNEXT: Add a subcommand that reports the newest row." % order[i]
     return "done"
 FINAL = "<|channel|>final<|message|>"
 
@@ -196,7 +268,102 @@ def syntax_ok(target, code):
                                   capture_output=True, timeout=20).returncode == 0
         finally:
             os.unlink(tmp)
+    if target.endswith(".sql"):
+        # sqlite is the thing that will run it, so sqlite is what judges it.
+        # Parsed against a throwaway in-memory database, never the real one.
+        import sqlite3
+        try:
+            con = sqlite3.connect(":memory:")
+            con.executescript(code)
+            con.close()
+            return True
+        except sqlite3.Error:
+            return False
+    if target.endswith(".js"):
+        # no Node in the sandbox, so this is a bracket/string balance check
+        # and is described as exactly that, not as a parse. It catches the
+        # truncation and unclosed-brace failures that actually happen.
+        return _brackets_balanced(code)
     return True
+
+
+def _brackets_balanced(code):
+    """Balance of (), [], {} outside strings and comments."""
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack = []
+    i, n = 0, len(code)
+    while i < n:
+        c = code[i]
+        if c == "/" and i + 1 < n and code[i + 1] == "/":
+            j = code.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if c == "/" and i + 1 < n and code[i + 1] == "*":
+            j = code.find("*/", i + 2)
+            if j < 0:
+                return False
+            i = j + 2
+            continue
+        if c in "\"'`":
+            j, closed = i + 1, False
+            while j < n:
+                if code[j] == "\\":
+                    j += 2
+                    continue
+                if code[j] == c:
+                    closed = True
+                    break
+                if code[j] == "\n" and c != "`":
+                    break
+                j += 1
+            if not closed:
+                return False
+            i = j + 1
+            continue
+        if c in "([{":
+            stack.append(c)
+        elif c in pairs:
+            if not stack or stack.pop() != pairs[c]:
+                return False
+        i += 1
+    return not stack
+
+
+# Scaffold files are written by the engine and must never be picked as a
+# repair target: a repair asked to fix "the module you just wrote" that
+# lands on store.py or __init__.py destroys shared machinery.
+NEVER_REPAIR = {"__init__.py", "store.py", "cli.py", "serve.py",
+                "app.js", "app.css", "index.html"}
+
+
+def resolve_target(target, tid, st):
+    """Turn an authoring torch's declared target into a concrete path.
+
+    `{n}`  -> the generation number, so each generation writes its own file
+    `{nn}` -> the same, zero padded, for anything ordered by filename
+              (migrations are applied in name order, and 10_x.sql sorting
+              before 2_x.sql silently applies them in the wrong order)
+
+    A repair torch has to land on the file that just failed rather than a
+    new one, so it resolves to the most recently modified file in the same
+    directory with the same extension. Matching on extension is what makes
+    this work for a route, a view or a migration and not only a module.
+    """
+    if "{n}" not in target and "{nn}" not in target:
+        return target
+    gen = int(st.get("generation") or 1)
+    ext = os.path.splitext(target)[1]
+    if tid.startswith("repair"):
+        d = os.path.join(st["dest"], os.path.dirname(target))
+        if os.path.isdir(d):
+            cands = [f for f in os.listdir(d)
+                     if f.endswith(ext) and not f.startswith("_")
+                     and f not in NEVER_REPAIR and not f.startswith(".")]
+            if cands:
+                newest = max(cands, key=lambda f: os.path.getmtime(os.path.join(d, f)))
+                return os.path.join(os.path.dirname(target), newest)
+        gen = 1
+    return target.replace("{nn}", "%03d" % gen).replace("{n}", str(gen))
 
 
 def ask_model(prompt, num_predict=6000, effort=None, target=None):
@@ -207,7 +374,13 @@ def ask_model(prompt, num_predict=6000, effort=None, target=None):
     buys nothing when the job is 'write four shell commands'."""
     body = {
         "model": MODEL, "prompt": prompt, "stream": False,
-        "options": {"temperature": 0.3, "num_predict": num_predict},
+        "options": {
+            "temperature": 0.3,
+            "num_predict": num_predict,
+            # without this Ollama uses 4096 and truncates the prompt from
+            # the front, silently discarding the invocation and the ember
+            "num_ctx": NUM_CTX,
+        },
     }
     if effort:
         body["system"] = f"Reasoning: {effort}"
@@ -387,23 +560,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 t = run_q(f"res: `rite`target!(torches[{qsym(tid)}]`rite; torches[{qsym(tid)}]`target)")
                 st = run_q(f"res: state[{qsym(pid)}]")
                 target = t["target"] or "cli.py"
-                if "{n}" in target:
-                    # the target carries its own extension -- appending .py to
-                    # every directory target named a shell test tests/gen1.py,
-                    # which was then correctly refused for not compiling, so
-                    # no test was ever written and the suite passed on an
-                    # empty glob.
-                    if tid.startswith("repair"):
-                        d = os.path.join(st["dest"], os.path.dirname(target))
-                        mods = sorted(
-                            (f for f in os.listdir(d) if f.endswith(".py")
-                             and not f.startswith("_") and f != "store.py"),
-                            key=lambda f: os.path.getmtime(os.path.join(d, f)),
-                        ) if os.path.isdir(d) else []
-                        target = (os.path.join(os.path.dirname(target), mods[-1])
-                                  if mods else target.replace("{n}", "1"))
-                    else:
-                        target = target.replace("{n}", str(st["generation"]))
+                target = resolve_target(target, tid, st)
                 prompt = (
                     f"{brief}\n\n{t['rite']}\n\n"
                     f"Reply with the complete contents of {target} and nothing else. "

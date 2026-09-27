@@ -112,9 +112,15 @@ That last piece is also where the danger concentrates. A dynamo that can mint ne
 
 ## Status
 
-The graph engine, a local UI, and a local-model-driven agent all exist and run end to end — a full walk from invocation to working code, decided entirely by a model running on this machine. Kindling, the dynamo, and evolution mode do not exist yet; they are the specification of intent the code has to answer to next. See [what's built versus what's described](docs/07-implementation.md).
+The graph engine, a local UI, and a local-model-driven agent all exist and run end to end — a full walk from invocation to working code, decided entirely by a model running on this machine. Kindling works, and the loop is closed: the agent runs generation after generation with no human input, each one choosing which arrangement to walk next and leaving a commit behind.
 
-Two things are unsolved in ways that block what comes next, and are worth naming here rather than burying: there is **no fitness signal**, so nothing can yet say which of several outcomes was better — and there is **no governance on self-invocation**, which has to be settled before the loop is closed rather than after. A metabolism with no check on whether it may feed itself again isn't bounded by anything.
+The seeded library is **46 torches across 8 graphs**, and the number worth quoting is that **30 of those 46 consult no model at all**. That ratio is the whole thesis made concrete — the deterministic work is written down, in scripts that derive an inventory from the syntax tree, remove unused imports, write the documentation by running the program, start the server and hit every route, apply migrations and read the schema back. What is left for the model is three things: pick one option from a closed menu, write one small file against a stated contract, or pick which arrangement comes next and name it in a sentence.
+
+Two graphs contain no authoring torches whatsoever. A generation that walks one spends itself getting strictly better at what the app already does.
+
+The dynamo does not exist — no torch mints new torches, all 46 are hand-authored. Evolution mode is implemented and runs, but no proposed mutation has yet survived selection.
+
+And the thing that most needs saying: **nothing here judges whether the code is any good.** Every gate asks "does it run". A feature that runs, passes a test the same model wrote for it, and is completely useless gets through all of them. The bigger library makes this sharper rather than softer, because there are now more ways to be confidently wrong. See [open problems](docs/06-open-problems.md).
 
 ---
 

@@ -58,14 +58,73 @@ def _extract(raw: str) -> str | None:
     return raw.strip() or None
 
 
-def ask_model(prompt: str, num_predict: int = 600) -> str | None:
+# The bridge honours FAKE_MODEL for authoring calls, but decisions and
+# kindling are asked from here, directly of Ollama -- so without this the
+# "canned model" selftest was quietly making real model calls for every
+# choice it made, taking minutes instead of seconds and giving a different
+# answer each run. A harness that is only deterministic in half its calls
+# is not deterministic.
+FAKE_MODEL = os.environ.get("FAKE_MODEL") == "1"
+
+# Ollama's default context is 4096 tokens and it truncates from the FRONT,
+# silently dropping the invocation and the ember -- the two things every
+# call is supposed to be answering toward. The brief is already ~10k
+# characters at a kindling torch.
+NUM_CTX = int(os.environ.get("NUM_CTX", "32768"))
+
+FAKE_CHOICES = {
+    "choose.surface": "both",
+    "choose.storage": "sqlite",
+    "choose.license": "mit",
+}
+# Overridable so a canned run can be aimed at any arrangement:
+#   FAKE_KINDLES=g.fullstack,g.route,g.view python3 agent.py ...
+# Without this, whichever graphs the default sequence omits are never
+# exercised by any fast test, which is how untested graphs ship.
+FAKE_KINDLE_ORDER = [g for g in os.environ.get(
+    "FAKE_KINDLES", "g.feature,g.schema,g.harden,g.document").split(",") if g]
+FAKE_KINDLES = []
+
+
+def fake_reply(prompt: str, torch: str | None = None) -> str:
+    """Canned answers for the executive calls, keyed on the TORCH.
+
+    Keyed on the torch id passed in, never on the prompt text. Sniffing the
+    prompt looked equivalent and was not: the brief embeds the chronicle, so
+    every later prompt contains "choose.surface -> both", the surface answer
+    was returned for the storage question, it matched no storage option, and
+    the run silently fell back to the default. The same mistake the bridge's
+    canned answers already had to be fixed for.
+    """
+    if "GRAPH:" in prompt:
+        i = len(FAKE_KINDLES)
+        FAKE_KINDLES.append(1)
+        if i >= len(FAKE_KINDLE_ORDER):
+            return "DECLINE"
+        want = FAKE_KINDLE_ORDER[i]
+        # only offer a graph this prophecy could actually walk, so the
+        # canned run exercises the capability gate rather than fighting it
+        if want not in prompt:
+            return "DECLINE"
+        return ("GRAPH: %s\nNEXT: Add a way to record and report stored items."
+                % want)
+    if torch and torch in FAKE_CHOICES:
+        return FAKE_CHOICES[torch]
+    return "done"
+
+
+def ask_model(prompt: str, num_predict: int = 600,
+              torch: str | None = None) -> str | None:
     """Call the local model. None means it produced nothing usable."""
+    if FAKE_MODEL:
+        return fake_reply(prompt, torch)
     for budget in (num_predict, num_predict * 3):
         res = http_json(f"{OLLAMA}/api/generate", {
             "model": MODEL,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": budget},
+            "options": {"temperature": 0.3, "num_predict": budget,
+                        "num_ctx": NUM_CTX},
         })
         text = _extract(res.get("response", ""))
         if text is not None:
@@ -90,7 +149,7 @@ def choose_option(brief_text: str, torch: dict) -> str:
         + ", ".join(options)
         + "\n\nOption:"
     )
-    reply = ask_model(prompt)
+    reply = ask_model(prompt, torch=torch["id"])
     if reply is None:
         print(f"      (no usable reply -- defaulting to {options[0]!r})")
         return options[0]
@@ -102,27 +161,71 @@ def choose_option(brief_text: str, torch: dict) -> str:
     return options[0]
 
 
-def propose_next_invocation(brief_text: str, torch: dict, ember: str) -> str | None:
-    """Ask the model for the daughter's invocation. None means decline."""
+def propose_kindling(brief_text: str, torch: dict, ember: str, offerable=None):
+    """Ask the model for the daughter's graph and invocation.
+
+    Two things, both narrow: pick one arrangement from a closed menu, and
+    write one sentence. The menu is the kindling torch's own options, which
+    are the graph ids, so it cannot drift out of step with the library.
+
+    Returns (graph, invocation). graph is None to decline.
+    """
+    options = [o for o in torch["options"] if o and o != "decline"]
+    # docs/02 invariant 4: capability gating is applied at OFFER time. A
+    # lineage that chose json storage cannot walk g.schema, whose root torch
+    # requires sqlite -- so offering it produces a daughter that is dead on
+    # arrival. `offerable` is the subset whose root torch this prophecy's
+    # inherited capabilities actually permit.
+    if offerable:
+        keep = [o for o in options if o in offerable]
+        if keep:
+            options = keep
     prompt = (
         f"{brief_text}\n\n"
         f"THE EMBER (what this whole lineage ultimately serves):\n  {ember}\n\n"
         f"{torch['rite']}\n\n"
-        "Reply with ONE sentence describing the single next thing to build, and nothing else.\n"
-        "If nothing worthwhile remains, or the next step would not serve the ember, reply with exactly: DECLINE\n\n"
-        "Next:"
+        "Reply with EXACTLY two lines and nothing else:\n"
+        "GRAPH: <one of " + ", ".join(options) + ">\n"
+        "NEXT: <one sentence naming the single thing to build>\n\n"
+        "If nothing worthwhile remains, or the next step would not serve the ember,\n"
+        "reply with exactly: DECLINE\n"
     )
-    reply = ask_model(prompt, num_predict=800)
+    reply = ask_model(prompt, num_predict=900)
     if reply is None:
-        return None  # unusable output is treated as a decline, not a guess
-    first_line = next((l.strip() for l in reply.splitlines() if l.strip()), "")
-    if not first_line or first_line.upper().startswith("DECLINE"):
-        return None
-    candidate = first_line.strip('"').strip()
-    # never let harmony markup or a truncated fragment become an invocation
-    if "<|" in candidate or len(candidate) < 10:
-        return None
-    return candidate
+        return None, None  # unusable output is a decline, not a guess
+    if "DECLINE" in reply.upper() and "GRAPH:" not in reply.upper():
+        return None, None
+
+    graph, invocation = None, None
+    for line in reply.splitlines():
+        line = line.strip()
+        up = line.upper()
+        if up.startswith("GRAPH:"):
+            said = line.split(":", 1)[1].strip().strip('`"\'')
+            # longest first, so g.fullstack is not matched as g.full
+            for opt in sorted(options, key=len, reverse=True):
+                if opt in said:
+                    graph = opt
+                    break
+        elif up.startswith("NEXT:"):
+            invocation = line.split(":", 1)[1].strip().strip('"').strip()
+
+    if invocation is None:
+        # tolerate a bare sentence where NEXT: was asked for, but never
+        # tolerate harmony markup or a truncated fragment
+        for line in reply.splitlines():
+            t = line.strip()
+            if t and not t.upper().startswith("GRAPH:") and len(t) >= 10:
+                invocation = t.strip('"').strip()
+                break
+    if not invocation or "<|" in invocation or len(invocation) < 10:
+        return None, None
+    if graph is None:
+        # a valid sentence with an unreadable graph choice is not a decline:
+        # hardening is the safe arrangement, because it adds no behaviour.
+        graph = "g.harden" if "g.harden" in options else options[0]
+        print(f"      (no readable graph choice -- defaulting to {graph})")
+    return graph, invocation
 
 
 def propose_mutations(brief_text: str, graph_edges: list, torch_ids: list, n: int = 3) -> list:
@@ -224,19 +327,22 @@ def receipt(pid: str) -> None:
             print(f"       {label}: could not run ({e})")
 
 
-def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str]:
+def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str | None, str]:
     """Walk one prophecy to completion.
 
-    Returns (next_invocation, reason). next_invocation is None when no
-    daughter should be spawned; reason explains why the walk ended.
+    Returns (next_graph, next_invocation, reason). next_invocation is None
+    when no daughter should be spawned; next_graph is which arrangement the
+    daughter walks, chosen at the kindling torch rather than fixed for the
+    whole lineage. reason explains why the walk ended.
     """
     next_invocation = None
+    next_graph = None
     seen = {}
     for step in range(1, MAX_STEPS_PER_PROPHECY + 1):
         state = http_json(f"{BRIDGE}/api/state?pid={pid}")
         frontier = [t for t in state["frontier"] if t]
         if not frontier:
-            return next_invocation, f"walk complete after {step - 1} step(s)"
+            return next_graph, next_invocation, f"walk complete after {step - 1} step(s)"
 
         torch_id = frontier[0]
         torch = by_id[torch_id]
@@ -244,14 +350,14 @@ def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str]:
 
         seen[torch_id] = seen.get(torch_id, 0) + 1
         if seen[torch_id] > 3 and torch_id != "repair.test":
-            return next_invocation, f"stuck: {torch_id} repeated {seen[torch_id]} times"
+            return next_graph, next_invocation, f"stuck: {torch_id} repeated {seen[torch_id]} times"
         # a wrong test must not be able to loop forever against right code
         if torch_id == "repair.test" and seen[torch_id] > 2:
             q = http_json(f"{BRIDGE}/api/quarantine", {"pid": pid})
             print(f"  [{step}] quarantined unfixable test(s): {q['quarantined']}")
             if not q["quarantined"]:
                 print("         nothing actually failing -- stopping this prophecy")
-                return next_invocation, "test suite disagreed with itself"
+                return next_graph, next_invocation, "test suite disagreed with itself"
             # the suite is re-lit from the frontier and should now pass on
             # its own; it cannot be forced, and should not be.
             continue
@@ -279,10 +385,13 @@ def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str]:
                             print(f"        variant {row['variant']} ({row['op']}): {row['score']}  {row['detail']}{mark}")
                 else:
                     print("      no usable mutations proposed")
-            next_invocation = propose_next_invocation(brief, torch, ember)
-            option = "spawn" if next_invocation else "decline"
+            next_graph, next_invocation = propose_kindling(
+                brief, torch, ember, state.get("offerable"))
+            # the chosen graph IS the option: the torch's options are the
+            # library's graph ids, so resolving one resolves the other.
+            option = next_graph if next_graph else "decline"
             if next_invocation:
-                print(f"      proposes: {next_invocation}")
+                print(f"      proposes {next_graph}: {next_invocation}")
             else:
                 print("      declines to kindle")
         else:
@@ -293,21 +402,25 @@ def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str]:
         result = http_json(f"{BRIDGE}/api/light", {"pid": pid, "torch": torch_id, "option": option})
         res = result["result"]
         if "error" in res:
-            return next_invocation, f"error: {res['error']}"
+            return next_graph, next_invocation, f"error: {res['error']}"
         if torch["kind"] == "validation":
             print(f"      check ran, outcome: {res['option']!r}")
         if res["filesWritten"]:
             print(f"      {res['filesWritten']} file(s) written")
 
-    return next_invocation, f"hit the {MAX_STEPS_PER_PROPHECY}-step ceiling"
+    return next_graph, next_invocation, f"hit the {MAX_STEPS_PER_PROPHECY}-step ceiling"
 
 
 def main():
     global EVOLVE, GRAPH_EDGES, BRIDGE
     ap = argparse.ArgumentParser()
     ap.add_argument("ember", nargs="*", default=["a small python cli tool"])
-    ap.add_argument("--graph", default="g.pycli")
-    ap.add_argument("--generations", type=int, default=3, help="stop after this many prophecies")
+    ap.add_argument("--graph", default="g.found",
+                    help="the arrangement the FOUNDING prophecy walks; every later\n"
+                         " generation picks its own at its kindling torch")
+    ap.add_argument("--generations", type=int, default=0,
+                    help="stop after this many prophecies; 0 means run until the\n"
+                         " hearth's own ceilings stop it, which is the point")
     ap.add_argument("--evolve", action="store_true",
                     help="breed competing graph variants at each kindling site")
     ap.add_argument("--bridge", default="http://127.0.0.1:8420", help="bridge base URL")
@@ -327,7 +440,8 @@ def main():
 
     graph = http_json(f"{BRIDGE}/api/graph")
     by_id = {n["id"]: n for n in graph["nodes"]}
-    GRAPH_EDGES = [e for e in graph["edges"] if e["graph"] == args.graph]
+    ALL_EDGES = graph["edges"]
+    GRAPH_EDGES = [e for e in ALL_EDGES if e["graph"] == args.graph]
 
     generation = 1
     while True:
@@ -335,21 +449,21 @@ def main():
         print(f"--- generation {generation}: {pid} ---")
         print(f"    invocation: {state['invocation']}")
 
-        next_invocation, reason = run_prophecy(pid, by_id, ember)
+        next_graph, next_invocation, reason = run_prophecy(pid, by_id, ember)
         print(f"    prophecy ended ({reason})")
         receipt(pid)
 
         if not next_invocation:
             print("\nlineage ends: nothing further proposed.")
             break
-        if generation >= args.generations:
+        if args.generations and generation >= args.generations:
             print(f"\nlineage stopped: hit the --generations ceiling ({args.generations}).")
             break
 
         try:
             spawned = http_json(f"{BRIDGE}/api/kindle", {
                 "pid": pid, "invocation": next_invocation,
-                "graph": args.graph, "brownfield": not args.fresh_dirs,
+                "graph": next_graph, "brownfield": not args.fresh_dirs,
             })
         except urllib.error.HTTPError as e:
             print(f"\nlineage stopped: kindle failed ({e})")
@@ -359,6 +473,9 @@ def main():
             break
 
         pid = spawned["pid"]
+        # evolution proposes mutations to whichever graph is being walked,
+        # so the edge list has to follow the daughter's choice
+        GRAPH_EDGES = [e for e in ALL_EDGES if e["graph"] == next_graph]
         generation += 1
         print()
 

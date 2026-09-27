@@ -130,8 +130,25 @@ walk: {[lb;g;frm;lbl] exec dst from edges where lib=lb, graph=g, src=frm, label=
 / prophecy; eligible/walkable narrow raw reachability down to what
 / those choices actually leave available, e.g. picking a python-only
 / docker image should make a node-writing torch simply not come up.
+/ every prophecy from this one back to the founding one. A choice made
+/ at generation 1 -- sqlite rather than json, an http surface rather
+/ than cli-only -- has to still be in force at generation 40, or every
+/ daughter re-decides what its lineage settled long ago. That is exactly
+/ the re-deciding the ratchet exists to stop.
+ancestry: {[pid]
+  chain: enlist pid;
+  cur: pid;
+  / bounded: a malformed parent pointer must not spin forever
+  while[(count chain) < 500;
+    par: @[{prophecies[x]`parent}; cur; `];
+    if[(null par) or par ~ `; :chain];
+    if[par in chain; :chain];
+    chain,: par;
+    cur: par ];
+  chain }
+
 capabilities: {[pid]
-  ch: 0!select torch,option from chronicle where prophecy=pid;
+  ch: 0!select torch,option from chronicle where prophecy in ancestry pid;
   distinct raze {[row] exec capability from provides where torch=row`torch, option in (row`option;`)} each ch}
 
 eligible: {[pid;tid] all (exec capability from requires where torch=tid) in capabilities[pid]}
@@ -331,6 +348,60 @@ prophecies: ([id:`symbol$()]
 
 chronicle: ([] prophecy:`symbol$(); seq:`long$(); torch:`symbol$(); option:`symbol$(); ts:`timestamp$())
 
+/ ---- prophecies: the run-level context a torch needs beyond its rite ----
+/ a torch's rite alone doesn't carry what's already happened in this run
+/ or what the working directory looks like. A prophecy is the run: it
+/ pins the invocation and the working directory, `chronicle` is the
+/ trail of torches already lit within it, and `tree` is a plain listing
+/ of what's actually on disk right now. `brief` bundles all of that into
+/ what a model call at a torch actually needs; `lightin` lights a torch
+/ inside a named prophecy and appends it to the trail automatically.
+
+/ 'frontier' is the set of torches currently available to be lit -- it
+/ starts as the graph's root torches (no incoming edge) and after each
+/ light[] loses the torch just lit and gains whatever it walkably leads
+/ to. More than one entry at once is normal, not an edge case: multiple
+/ disconnected roots, or a model lighting more than one torch from the
+/ same position, both just mean several torches are lit at once.
+/ a hearth is the whole multi-generational process: one ember (the
+/ founding invocation every descendant traces back to), one library,
+/ and every prophecy descended from the first. The hearth is the thing
+/ that is actually alive; prophecies are its cells. The ceilings are
+/ not optional extras -- a metabolism with no check on whether it may
+/ feed itself again is bounded by nothing, so kindling refuses once a
+/ hearth is out of budget. autokindle off means a person approves each
+/ generation; on means the loop runs itself until a ceiling stops it.
+/ a hearth runs continuously by default. Cell division does not stop
+/ at generation five, and neither should this -- what actually stops a
+/ living process is running out of something, or being killed, or
+/ failing. So the brakes here are resources and signals, not a counter:
+/   diskcap  bytes the hearth's runs may occupy (0 = unlimited)
+/   maxproph total prophecies (0 = unlimited, the default)
+/   halt     a kill-switch path; if that file exists, kindling stops
+/ plus the two that were always there and are the real regulators: the
+/ model declining to propose anything, and a prophecy that fails
+/ validation never reaching its kindling torch at all.
+hearths: ([id:`symbol$()]
+  ember: ();               / the founding invocation
+  evolution: `boolean$();  / breed competing graph variants
+  lib: `symbol$();         / which library this hearth walks
+  diskcap: `long$();       / bytes across the hearth's runs, 0 = unlimited
+  maxproph: `long$();      / 0 = unlimited
+  halt: ();                / kill-switch file path
+  born: `timestamp$() )
+
+prophecies: ([id:`symbol$()]
+  hearth: `symbol$();      / which hearth this cell belongs to
+  lib: `symbol$();         / which library it walks -- a candidate copy during a race
+  parent: `symbol$();      / the prophecy that kindled it, ` for the first
+  generation: `long$();
+  graph: `symbol$();       / which graph from the library it walks
+  invocation: ();
+  dest: ();
+  frontier: () )
+
+chronicle: ([] prophecy:`symbol$(); seq:`long$(); torch:`symbol$(); option:`symbol$(); ts:`timestamp$())
+
 / declared, not inferred. Inferring "no inbound edge" meant a mutation
 / that orphaned a torch silently promoted it to an entry point -- the
 / first race here rewired kindle.next's only inbound edge away and the
@@ -377,13 +448,27 @@ begin: {[hid;pid;g;invocation;dest]
 tree: {[dest] last runin[dest; "find . -type f -not -name '.*' -not -path '*/__pycache__/*' -not -name '*.pyc' | sort"]}
 
 / full snapshot of one prophecy -- what a UI needs on every refresh.
+/ Which graphs in the library this prophecy could actually walk, judged by
+/ whether its inherited capabilities satisfy the graph's ROOT torch.
+/ docs/02 invariant 4 is that capability gating happens at offer time, and a
+/ kindling menu is an offer: a lineage that chose json storage must never be
+/ shown g.schema, whose root torch requires sqlite, because choosing it
+/ produces a daughter whose first torch can never light. Cheap to compute
+/ and exactly as strict as the root -- a graph whose LATER torches are gated
+/ is still offerable, and correctly so, since those branches simply will not
+/ be taken.
+offerable: {[pid]
+  p: prophecies[pid];
+  gs: exec id from graphs where lib=p`lib;
+  gs where {[pid;lb;g] all eligible[pid;] each roots[lb;g]}[pid;p`lib] each gs }
+
 state: {[pid]
   p: prophecies[pid];
   h: hearths[p`hearth];
   trail: 0!select seq,torch,option from chronicle where prophecy=pid;
-  `invocation`ember`dest`graph`hearth`parent`generation`frontier`trail`capabilities`tree!
+  `invocation`ember`dest`graph`hearth`parent`generation`frontier`trail`capabilities`offerable`tree!
     (p`invocation; h`ember; p`dest; p`graph; p`hearth; p`parent; p`generation;
-     p`frontier; trail; capabilities[pid]; tree p`dest) }
+     p`frontier; trail; capabilities[pid]; offerable[pid]; tree p`dest) }
 
 logchoice: {[pid;tid;opt]
   seq: 1 + max (0j, exec seq from chronicle where prophecy=pid);
@@ -392,14 +477,61 @@ logchoice: {[pid;tid;opt]
 / the contents of what has actually been built, capped so a large file
 / cannot swamp the prompt. A kindling torch that can only see filenames
 / proposes work that is already done -- it needs to read the code.
+/ Every path any torch writes in `once` mode. These are the scaffold --
+/ dispatchers, shared modules, the tool scripts -- written once and
+/ never rewritten by anyone. Derived from the files table rather than
+/ listed separately, so adding a scaffold torch cannot forget to
+/ register its output here.
+scaffoldpaths: {[] distinct exec path from files where mode=`once}
+
+/ what a model is shown of the codebase, and deliberately not all of it.
+/ Handing back the dispatcher, app/db.py and every tool script costs tens
+/ of thousands of tokens, invites the model to "fix" machinery it must
+/ never touch, and is the single fastest way to exhaust a local model's
+/ context. What it needs is what previous generations AUTHORED, plus the
+/ derived overview a survey torch leaves behind.
+/ SRCCAP is the total budget across all files, not per file: without a
+/ total, cost per generation grows with the size of the codebase, which
+/ is the ceiling on how long a lineage can run at all.
+SRCCAP: 24000
+FILECAP: 6000
+
+/ Only these are read back as source. An allowlist rather than a denylist
+/ on purpose: the first thing a database-backed generation put in the
+/ working directory was app.db, a binary SQLite file, which read0 happily
+/ turned into raw control bytes, embedded in the brief, and handed to the
+/ JSON encoder -- which produced a 500 and killed the walk at step five.
+/ A denylist would have needed to predict that; an allowlist did not.
+TEXTEXT: (".py"; ".sh"; ".js"; ".css"; ".html"; ".sql"; ".md"; ".txt";
+          ".csv"; ".toml"; ".cfg"; ".ini")
+
+/ runtime state, not source. These are things the program WROTE, and
+/ feeding a model its own app's data as if it were code invites it to
+/ "fix" the data instead of the feature.
+DATAFILES: ("data.json"; "config.json")
+
+textual: {[rel]
+  base: last "/" vs rel;
+  $[base in DATAFILES; 0b;
+    any {[b;e] $[(count b) >= count e; e ~ neg[count e] sublist b; 0b]}[base] each TEXTEXT] }
+
 sources: {[dest]
   fs: tree dest;
-  $[0 = count fs; ();
-    raze {[d;f]
-      full: d,"/",1_f;
-      txt: @[{"\n" sv read0 hsym `$x}; full; {""}];
-      $[8000 < count txt; txt: (8000#txt),"\n... (truncated)"; txt];
-      enlist (1_f;txt) }[dest] each fs] }
+  / find prints "./app/db.py"; drop the "./" so these compare against the
+  / files table, which stores "app/db.py"
+  rels: 2_/:fs;
+  keep: where textual each rels;
+  rels: rels keep;
+  rels: rels where not rels in scaffoldpaths[];
+  $[0 = count rels; ();
+    [rows: raze {[d;rel]
+       txt: @[{"\n" sv read0 hsym `$x}; d,"/",rel; {""}];
+       $[FILECAP < count txt; txt: (FILECAP#txt),"\n... (truncated)"; txt];
+       enlist (rel;txt) }[dest] each rels;
+     / keep the newest work when the budget runs out: a late generation
+     / cares about what it just wrote, not generation one's module.
+     running: sums count each last each rows;
+     rows where running <= SRCCAP] ] }
 
 brief: {[pid;tid]
   p: prophecies[pid];
@@ -651,122 +783,12 @@ race: {[hid;g;muts;scratch]
   if[keep; mutate[base;g;muts best`variant]];
   `winner`applied`scores!(best`variant; keep; t) }
 
-/ ---- seed: two libraries ----
-/ The torch library is the vocabulary: each torch declared once,
-/ independent of where it gets used. The graph library is the
-/ arrangements. `members` wires vocabulary into arrangement, and
-/ because it is many-to-many, install.docker below genuinely appears
-/ in both graphs rather than being duplicated for each.
-/ Each torch is sized to a single unambiguous action, not a phase of
-/ work -- "install Docker" and "add argument parsing to this script"
-/ are the actual grain a torch is meant to be cut at, per the README.
-
-/ -- the torch library --
-
-/ The dispatcher is written once and never again -- `addonce` means it
-/ is created if absent and never overwritten, so a daughter generation
-/ cannot destroy what its parent built.
-/ Crucially, features are SEPARATE MODULES. Earlier versions had every
-/ generation re-emit the whole of cli.py, which burned tokens
-/ quadratically, got slower each generation, and truncated mid-file at
-/ around 160 lines. Each generation now writes one small module and
-/ touches nothing else, so cost per generation is flat rather than
-/ growing, and no single authoring call has to hold the whole program.
-addtorch[`scaffold.app; `action; ""; "chmod +x cli.py"; enlist `done]
-addonce[`scaffold.app; `; "cli.py"; "#!/usr/bin/env python3\n\"\"\"Command-line app. Features live as modules in features/ and are\ndiscovered automatically -- this file does not change as they are added.\"\"\"\nimport argparse\nimport importlib\nimport pathlib\nimport pkgutil\nimport sys\n\n\ndef load_features(sub):\n    here = pathlib.Path(__file__).resolve().parent\n    fdir = here / \"features\"\n    if not fdir.is_dir():\n        return 0\n    if str(here) not in sys.path:\n        sys.path.insert(0, str(here))\n    n = 0\n    for m in sorted(pkgutil.iter_modules([str(fdir)]), key=lambda x: x.name):\n        if m.name.startswith(\"_\") or m.name == \"store\":\n            continue\n        try:\n            mod = importlib.import_module(\"features.\" + m.name)\n        except Exception as e:\n            print(\"skipping %s: %s\" % (m.name, e), file=sys.stderr)\n            continue\n        if not hasattr(mod, \"register\"):\n            continue\n        try:\n            mod.register(sub)\n            n += 1\n        except Exception as e:\n            print(\"skipping %s: %s\" % (m.name, e), file=sys.stderr)\n    return n\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=\"usage: subcommands are provided by features/\")\n    sub = parser.add_subparsers(dest=\"command\")\n    load_features(sub)\n    args = parser.parse_args()\n    if not getattr(args, \"command\", None):\n        parser.print_help()\n        return\n    args.func(args)\n\n\nif __name__ == \"__main__\":\n    main()\n"]
-addonce[`scaffold.app; `; "features/__init__.py"; ""]
-addonce[`scaffold.app; `; "sample.csv"; "name,dept,salary,start\nAda,eng,120000,2019-03-01\nGrace,eng,135000,2017-07-15\nAlan,research,110000,2021-01-20\nKatherine,research,118000,2018-11-05\nEdsger,eng,125000,2020-06-30\n"]
-addonce[`scaffold.app; `; "tests/.keep"; ""]
-addonce[`scaffold.app; `; "run_tests.sh"; "#!/bin/sh\n# Runs every test written so far. A generation that breaks an earlier\n# feature fails here rather than passing because its own subcommand works.\nn=0\nfail=0\nfor t in tests/*.sh; do\n  [ -e \"$t\" ] || continue\n  n=$((n + 1))\n  if sh \"$t\" >/dev/null 2>&1; then\n    echo \"  ok   $t\"\n  else\n    echo \"  FAIL $t\"\n    fail=1\n  fi\ndone\nq=0\nfor t in tests/quarantine/*.sh; do\n  [ -e \"$t\" ] && q=$((q + 1))\ndone\nif [ \"$n\" -eq 0 ] && [ \"$q\" -eq 0 ]; then\n  echo \"no tests found\"\n  exit 1\nfi\necho \"$n passed, $q quarantined\"\nexit $fail\n"]
-addonce[`scaffold.app; `; "features/store.py"; "\"\"\"Shared JSON store for feature modules.\"\"\"\nimport json\nimport pathlib\n\nPATH = pathlib.Path(__file__).resolve().parent.parent / \"data.json\"\n\n\ndef load():\n    if not PATH.exists():\n        return []\n    try:\n        return json.loads(PATH.read_text() or \"[]\")\n    except json.JSONDecodeError:\n        return []\n\n\ndef save(rows):\n    PATH.write_text(json.dumps(rows, indent=2))\n"]
-
-addauthor[`author.feature; `authoring;
-  "Write ONE new feature module. It must define register(sub) which calls sub.add_parser(NAME, ...) to add exactly one subcommand and ends with p.set_defaults(func=run), and a run(args) function implementing it. NAME must describe what the subcommand DOES -- a short verb or noun a user would type, like head, filter, stats, sort -- and must NEVER be the module filename. Import shared persistence with `from features import store` and use store.load() / store.save(rows) -- rows is a list of dicts. Standard library only. Do not rewrite cli.py, do not redefine other subcommands, write only this one module.";
-  "features/gen{n}.py"; "";
-  enlist `written]
-
-addtorch[`verify.cli; `validation; "";
-  "python3 cli.py --help > /tmp/v.out 2>&1 && test -s /tmp/v.out && grep -qi usage /tmp/v.out";
-  `pass`fail]
-
-/ the repair path. A validation failure used to end the prophecy, so a
-/ single malformed generation killed the whole lineage. Now the error
-/ goes back to the model as its own torch, and the check runs again.
-addauthor[`repair.feature; `authoring;
-  "The app does not run. Its error output is shown above. Fix the feature module you just wrote -- reply with its complete corrected contents, same register(sub)/run(args) contract, standard library only.";
-  "features/gen{n}.py"; "";
-  enlist `repaired]
-
-/ the model writes the demonstration for its own program, because
-/ nothing else knows what arguments it takes.
-addauthor[`author.demo; `authoring;
-  "Write a short sh script demonstrating every subcommand this app now has, using real arguments that will actually succeed. Invoke it as: python3 cli.py SUBCOMMAND ARGS -- never ./cli.py. A CSV fixture named sample.csv exists in the working directory; use it. Plain sh, one command per line, no comments, no markdown.";
-  "demo.sh"; "";
-  enlist `written]
-
-addtorch[`demo.run; `validation; "";
-  "sh demo.sh > /tmp/d.out 2>&1 && test -s /tmp/d.out && ! grep -qiE 'traceback|error:|not recognized|invalid choice' /tmp/d.out && cat /tmp/d.out | head -40";
-  `pass`fail]
-
-addauthor[`repair.test; `authoring;
-  "The test script shown failing above is wrong -- the feature it tests already compiles, runs, and works when invoked. Fix the TEST, not the feature. Common causes: $(...) strips trailing newlines so an expected string must not end in one; $'...' is a bashism that plain sh does not interpret. Reply with the complete corrected test script.";
-  "tests/gen{n}.sh"; "";
-  enlist `repaired]
-
-addauthor[`author.test; `authoring;
-  "Write a POSIX sh test script for the subcommand just added. Invoke the app as: python3 cli.py SUBCOMMAND ARGS -- never ./cli.py. Use the fixture sample.csv in the working directory. Two traps to avoid: $(...) strips trailing newlines, so an expected string must NOT end with one; and $'...' is a bashism plain sh will not interpret -- build multi-line expectations with printf instead. Run the subcommand, compare against the exact expected result, and `exit 1` with a message if it differs. Plain sh only, no frameworks, no markdown. Keep it to a handful of assertions that are definitely true of the code shown above.";
-  "tests/gen{n}.sh"; "";
-  enlist `written]
-
-/ runs EVERY test written so far, not just the newest. This is what makes
-/ accumulation safe: generation 8 cannot quietly break what generation 2
-/ built, because generation 2 left an assertion behind.
-addtorch[`test.suite; `validation; ""; "sh run_tests.sh"; `pass`fail]
-
-addtorch[`kindle.next; `kindling;
-  "This build is finished and verified, and its current source is shown above. Looking at what the app ALREADY does, and at the ember this lineage serves, what is the single most worthwhile next subcommand to add? Name one capability the code does not yet have.";
-  "";
-  `spawn`decline]
-
-addtorch[`install.docker; `action; ""; ""; enlist `done]
-addtool[`install.docker; `; `docker; "command -v docker"; "curl -fsSL https://get.docker.com | sh"]
-
-addtorch[`choose.docker.image; `decision;
-  "Which base image should this project run in?";
-  "";
-  `python_image`node_image]
-addprovide[`choose.docker.image; `python_image; `python3]
-addprovide[`choose.docker.image; `node_image; `nodejs]
-
-/ -- the graph library --
-
-addgraph[`g.pycli; `scaffold.app; "grow a python command-line tool one feature module at a time"]
-addto[`g.pycli;] each `scaffold.app`author.feature`verify.cli`repair.feature`author.demo`demo.run`author.test`test.suite`repair.test`kindle.next;
-addedge[`g.pycli; `scaffold.app;   `done;     `author.feature]
-addedge[`g.pycli; `author.feature; `written;  `verify.cli]
-addedge[`g.pycli; `verify.cli;     `pass;     `author.demo]
-addedge[`g.pycli; `verify.cli;     `fail;     `repair.feature]
-addedge[`g.pycli; `repair.feature; `repaired; `verify.cli]
-addedge[`g.pycli; `author.demo;    `written;  `demo.run]
-addedge[`g.pycli; `demo.run;       `pass;     `author.test]
-addedge[`g.pycli; `author.test;    `written;  `test.suite]
-addedge[`g.pycli; `test.suite;     `pass;     `kindle.next]
-addedge[`g.pycli; `test.suite;     `fail;     `repair.test]
-addedge[`g.pycli; `repair.test;    `repaired; `test.suite]
-addedge[`g.pycli; `demo.run;       `fail;     `repair.feature]
-addedge[`g.pycli; `kindle.next;    `spawn;    `]
-addedge[`g.pycli; `kindle.next;    `decline;  `]
-
-/ install.docker and kindle.next are members of this graph too -- the
-/ same torches, not copies. That is the point of a torch library kept
-/ separate from a graph library.
-addgraph[`g.langpick; `install.docker; "pick a base image, then decide what to build"]
-addto[`g.langpick;] each `install.docker`choose.docker.image`kindle.next;
-addedge[`g.langpick; `install.docker;      `done;         `choose.docker.image]
-addedge[`g.langpick; `choose.docker.image; `python_image; `kindle.next]
-addedge[`g.langpick; `choose.docker.image; `node_image;   `kindle.next]
-addedge[`g.langpick; `kindle.next;         `spawn;        `]
-addedge[`g.langpick; `kindle.next;         `decline;      `]
+/ ---- seed: the library ----
+/ The vocabulary and the arrangements both live in q/library.q, which is
+/ data rather than engine: nothing below this line knows what any torch
+/ means. It is a separate file because it is large -- a library small
+/ enough to inline is a library too small to build an application with.
+\l q/library.q
 
 / ---- persistence ----
 

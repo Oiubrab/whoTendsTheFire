@@ -1,5 +1,29 @@
 # 06 — Open problems
 
+## Closed since this was written
+
+Recorded here rather than deleted, because what a problem turned out to be is
+usually more useful than the fact that it is gone.
+
+- **The library was too small to build an application.** It was 12 torches and
+  one arrangement — "add a Python subcommand" — so a week-long run would have
+  produced a CLI with a thousand subcommands rather than an app. Now 46 torches
+  in 8 graphs, 30 of which consult no model at all. See
+  [07](07-implementation.md).
+- **The brief grew without bound.** It handed the model every file in the
+  working directory, which with a real scaffold is tens of thousands of tokens
+  of machinery the model must never touch. Now the scaffold is excluded
+  (derived from the `files` table), binaries are excluded by a text allowlist,
+  and `SRCCAP` caps the *total*. Measured at 8.4k characters at a kindling
+  torch in a five-generation run, and it does not grow with the scaffold.
+- **Capabilities died with their prophecy.** A choice made at generation 1 was
+  invisible at generation 2, so every daughter re-decided what the lineage had
+  already settled — precisely what the ratchet exists to prevent. Capabilities
+  are now read from the whole ancestry.
+- **A daughter could not walk a different graph.** The agent passed the same
+  graph through forever. The kindling torch's options are now the graph ids.
+
+
 Things that are genuinely unsolved. Written down as problems rather than smoothed over, so that nobody — including us later — mistakes a gap for a decision.
 
 Ordered roughly by how badly they block what comes next.
@@ -121,3 +145,23 @@ That was always described as a placeholder. It becomes load-bearing the moment p
 `N candidates × M kindling sites` per generation, all but `M` discarded, every generation, forever. Ten sandboxed runs to advance one step is plausible on an idle desktop and not plausible at any larger scale.
 
 No mechanism currently exists for adaptive `N` (fewer candidates when the model is confident), for early termination of clearly-losing candidates, or for reusing work across candidates that share a prefix.
+
+## The one that matters most
+
+Nothing in this system judges whether the code it produces is any *good*.
+
+Every gate asks "does it run". `verify.compile` asks whether it parses,
+`verify.api` whether the routes answer, `test.suite` whether the model's own
+test agrees with the model's own feature. A feature that runs, is tested by a
+test that passes, and is completely useless gets through all of it — and a
+lineage can spend forty generations accumulating useless features while every
+check stays green.
+
+The library makes this *sharper* rather than softer, because it can now build
+much more per generation. A bigger vocabulary means more ways to be
+confidently wrong.
+
+`g.harden` is a partial answer and worth naming as one: a generation that adds
+no behaviour and only improves what exists cannot add a useless feature. But
+choosing to spend a generation that way is still the model's call, and nothing
+forces it.
