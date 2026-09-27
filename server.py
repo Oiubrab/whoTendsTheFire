@@ -500,9 +500,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # h2bde009c tell a human nothing about when they ran or what
                 # they were building, and reconstructing that later needed
                 # archaeology across nine db snapshots.
+                # A human has to be able to find this six days later. The name
+                # carries when it ran and what it was for; the four hex digits
+                # only break ties between two runs of the same ember in the
+                # same minute.
                 slug = re.sub(r"[^a-z0-9]+", "-", invocation.lower()).strip("-")[:40] or "run"
                 stamp = time.strftime("%Y-%m-%d-%H%M")
-                dest = os.path.join(RUNS_DIR, f"{stamp}-{slug}-{hid[1:5]}", pid)
+                # "app", not the prophecy id: daughters extend the parent's
+                # directory by default, so there is exactly one of these per
+                # hearth and a hex name on it was pure noise.
+                dest = os.path.join(RUNS_DIR, f"{stamp}-{slug}-{hid[1:5]}", "app")
                 os.makedirs(RUNS_DIR, exist_ok=True)
                 expr = (
                     f"ignite[{qsym(hid)};{qstr(invocation)};{'1b' if evolution else '0b'}];"
@@ -671,8 +678,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     else None
                 )
                 if expr_dest is None:
-                    hid = run_q(f"res: exec first hearth from prophecies where id={qsym(pid)}")
-                    newdest = qstr(os.path.join(RUNS_DIR, str(hid), newpid))
+                    # --fresh-dirs: build alongside rather than in place. This
+                    # used to name the directory from the raw hearth id, which
+                    # put generation 2 in runs/h9a3f21c8/ while generation 1 was
+                    # in runs/2026-09-27-1251-slug-9a3f/ -- one lineage split
+                    # across two unrelated-looking directories.
+                    parent = run_q(f"res: exec first dest from prophecies where id={qsym(pid)}")
+                    gen = run_q(f"res: 1 + exec first generation from prophecies where id={qsym(pid)}")
+                    hearth_dir = os.path.dirname(str(parent))
+                    newdest = qstr(os.path.join(hearth_dir, "gen%d" % int(gen)))
                 else:
                     newdest = expr_dest
                 expr = (

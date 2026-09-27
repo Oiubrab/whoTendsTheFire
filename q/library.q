@@ -119,6 +119,8 @@ scaf[`scaffold.tools; "tools/webcheck.py"]
 scaf[`scaffold.tools; "tools/smoke.py"]
 scaf[`scaffold.tools; "tools/schemacheck.py"]
 scaf[`scaffold.tools; "tools/packagecheck.py"]
+scaf[`scaffold.tools; "tools/roundtrip.py"]
+scaf[`scaffold.tools; "tools/coverage.py"]
 addrequire[`scaffold.tools; `tree]
 addprovide[`scaffold.tools; `; `tools]
 
@@ -199,7 +201,7 @@ addauthor[`author.feature; `authoring;
 addrequire[`author.feature; `surface.cli]
 
 addauthor[`author.route; `authoring;
-  "Write ONE new api module. It must define register(routes) which calls routes.add(METHOD, PATH, fn) for each endpoint, where METHOD is a string like \"GET\", PATH starts with /api/ and may contain one :id segment, and fn is a function taking a single req argument. req.json() gives the decoded request body as a dict, req.query gives the query string as a dict, req.params gives path segments like :id. A handler returns a dict or list (sent as JSON with status 200), or a (status, payload) tuple. Raise errors.Invalid or errors.NotFound from `from app import errors` rather than returning an error by hand. Standard library only. Do not rewrite serve.py, do not re-register an existing path, write only this one module.";
+  "Write ONE new api module. It must define register(routes) which calls routes.add(METHOD, PATH, fn) for each endpoint, where METHOD is a string like \"GET\", PATH starts with /api/ and may contain one :id segment, and fn is a function taking a single req argument. req.json() gives the decoded request body as a dict, req.query gives the query string as a dict, req.params gives path segments like :id. A handler returns a dict or list (sent as JSON with status 200), or a (status, payload) tuple. Raise errors.Invalid or errors.NotFound from `from app import errors` rather than returning an error by hand.\n\nTHE CONTRACT THAT IS CHECKED: if you register a POST on a path, you MUST also register a GET on that same path, the POST MUST accept a JSON body containing a `name` field and ACTUALLY PERSIST it, and the GET MUST return what was persisted. Persist with db.execute(\"insert into TABLE(name) values (?)\", (name,)) and read with db.query(\"select * from TABLE order by id\") -- using a table name the survey above shows really exists. A handler that validates its input and returns 201 without writing anything will be rejected. Do not wrap your query in try/except: a missing table must fail loudly, not be silently reported as an empty list.\n\nStandard library only. Do not rewrite serve.py, do not re-register an existing path, write only this one module.";
   "api/gen{n}.py"; ""; enlist `written]
 addrequire[`author.route; `surface.http]
 
@@ -219,11 +221,11 @@ addauthor[`author.demo; `authoring;
 addrequire[`author.demo; `surface.cli]
 
 addauthor[`author.test; `authoring;
-  "Write a POSIX sh test script for the subcommand just added. Invoke the app as: python3 cli.py SUBCOMMAND ARGS -- never ./cli.py. Use the fixture sample.csv in the working directory. Two traps to avoid: $(...) strips trailing newlines, so an expected string must NOT end with one; and $'...' is a bashism plain sh will not interpret -- build multi-line expectations with printf instead. Run the subcommand, compare against the exact expected result, and `exit 1` with a message if it differs. Plain sh only, no frameworks, no markdown. Keep it to a handful of assertions that are definitely true of the code shown above.";
+  "Write a POSIX sh test script for the subcommand just added. Invoke the app as: python3 cli.py SUBCOMMAND ARGS -- never ./cli.py. Use the fixture sample.csv in the working directory. Two traps to avoid: $(...) strips trailing newlines, so an expected string must NOT end with one; and $'...' is a bashism plain sh will not interpret -- build multi-line expectations with printf instead. Run the subcommand, compare against the exact expected result, and `exit 1` with a message if it differs.\n\nTHE CONTRACT THAT IS CHECKED: the test MUST invoke the subcommand this generation just added, as `python3 cli.py NAME`. A test that does not name it will be rejected.\n\nPlain sh only, no frameworks, no markdown. Keep it to a handful of assertions that are definitely true of the code shown above.";
   "tests/gen{n}.sh"; ""; enlist `written]
 
 addauthor[`author.apitest; `authoring;
-  "Write a POSIX sh test script for the HTTP endpoints just added. The server is NOT running, so start it yourself on port 8071, wait for it, make the requests, then kill it. Use this exact shape:\n\npython3 serve.py --port 8071 >/dev/null 2>&1 &\nSRV=$!\ni=0\nwhile [ $i -lt 40 ]; do python3 -c \"import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1',8071))==0 else 1)\" && break; i=$((i+1)); sleep 0.2; done\n... your checks here, each using python3 -c with urllib.request ...\nkill $SRV\n\nUse python3 -c with urllib.request rather than curl, which may not exist. Check the status and the decoded body of each endpoint. `exit 1` with a message on any mismatch, and kill the server before exiting. Plain sh only, no markdown.";
+  "Write a POSIX sh test script for the HTTP endpoints just added. The server is NOT running, so start it yourself on port 8071, wait for it, make the requests, then kill it. Use this exact shape:\n\npython3 serve.py --port 8071 >/dev/null 2>&1 &\nSRV=$!\ni=0\nwhile [ $i -lt 40 ]; do python3 -c \"import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1',8071))==0 else 1)\" && break; i=$((i+1)); sleep 0.2; done\n... your checks here, each using python3 -c with urllib.request ...\nkill $SRV\n\nUse python3 -c with urllib.request rather than curl, which may not exist.\n\nTHE CONTRACT THAT IS CHECKED: your test MUST request the endpoints THIS generation added, by their exact paths. A test that only checks /api/health tests the scaffold and not your work, and will be rejected. For a path with both POST and GET, POST a record and then GET it back and assert the value you wrote is present.\n\n`exit 1` with a message on any mismatch, and kill the server before exiting. Plain sh only, no markdown.";
   "tests/api{n}.sh"; ""; enlist `written]
 addrequire[`author.apitest; `surface.http]
 
@@ -316,6 +318,26 @@ addtorch[`verify.tidy; `validation; ""; "python3 tools/tidy.py --check"; `pass`f
 addtorch[`verify.docs; `validation; "";
   "test -s docs/USAGE.md && ! grep -q 'Nothing is built yet' docs/USAGE.md && wc -c docs/USAGE.md";
   `pass`fail]
+
+/ Write through the API, then read back and demand what was written.
+/ This is the gate every other check was missing. The app that prompted it
+/ passed verify.compile, verify.routes, verify.api, verify.web AND its own
+/ test suite while storing nothing at all: the POST handler validated its
+/ input, returned 201 and never wrote a row, and the GET selected from a
+/ table that did not exist inside a bare except that reported the error as
+/ an empty list. Every gate asked "does it answer". None asked "does it
+/ work". Confirmed to fail on that app and pass once the handler persists.
+addtorch[`verify.roundtrip; `validation; ""; "python3 tools/roundtrip.py"; `pass`fail]
+addrequire[`verify.roundtrip; `surface.http]
+
+/ Does a test so much as NAME each registered subcommand and route?
+/ Deliberately a weak question, and worth being honest that it is: it is a
+/ coverage floor, not a correctness check. But both tests in that same app
+/ asserted only that the scaffold's own /api/health returned ok, so the
+/ suite was green without either generation having exercised the route it
+/ had just added. A generation must not be able to claim a feature it never
+/ touched.
+addtorch[`verify.coverage; `validation; ""; "python3 tools/coverage.py"; `pass`fail]
 
 / every test ever written, not just the newest. This is what makes
 / accumulation safe: generation 8 cannot quietly break what generation 2
