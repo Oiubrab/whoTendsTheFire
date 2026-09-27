@@ -792,28 +792,25 @@ race: {[hid;g;muts;scratch]
 
 / ---- persistence ----
 
+/ Only runtime state persists: hearths, prophecies, chronicle. The
+/ library (torches, graphs, members, edges, files, toolreqs, provides,
+/ requires) is DECLARATIVE -- q/library.q is its source of truth and is
+/ loaded fresh, unconditionally, every time this file loads (see the
+/ \l near the top of the seed section).
+/ Persisting the library alongside runtime state was a real bug, found
+/ on the first live run after this library was seeded: a db/ directory
+/ created before the rewrite kept serving the OLD two-graph library
+/ forever after, because loaddb[] preferred whatever was last saved to
+/ whatever q/library.q currently said. A hearth asked to walk g.found
+/ got an empty frontier -- g.found didn't exist in what got loaded --
+/ and nothing said why. The library must never be able to go stale
+/ relative to its own source file.
 savedb: {[]
-  `:db/graphs set graphs;
-  `:db/members set members;
   `:db/hearths set hearths;
-  `:db/torches set torches;
-  `:db/edges set edges;
-  `:db/files set files;
-  `:db/toolreqs set toolreqs;
-  `:db/provides set provides;
-  `:db/requires set requires;
   `:db/prophecies set prophecies;
   `:db/chronicle set chronicle; }
 
 loaddb: {[]
-  graphs::get `:db/graphs;
-  members::get `:db/members;
   hearths::get `:db/hearths;
-  torches::get `:db/torches;
-  edges::get `:db/edges;
-  files::get `:db/files;
-  toolreqs::get `:db/toolreqs;
-  provides::get `:db/provides;
-  requires::get `:db/requires;
   prophecies::get `:db/prophecies;
   chronicle::get `:db/chronicle; }

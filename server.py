@@ -64,7 +64,15 @@ def run_q(expr: str, timeout: int = 30):
     (e.g. "res: 1+1" or "foo[]; res: state[...]") -- `res::X; Y` are two separate
     top-level statements in q, not a sequence returning Y, so this can't be done
     by wrapping an arbitrary caller expression in `res: {expr}` after the fact."""
-    boot = "loaddb[]" if os.path.exists(os.path.join(DB_DIR, "torches")) else "savedb[]"
+    # db/torches was the check here before savedb/loaddb were split -- the
+    # library no longer persists at all (it is always loaded fresh from
+    # q/library.q), so that file is never written anymore and this check
+    # was permanently false. Every call thought no state existed yet and
+    # started blank, which meant nothing survived from one call to the
+    # next: begin[] in one request, then state[] in the very next request,
+    # found an empty hearths table. db/hearths is what runtime state now
+    # writes, so it is what this has to check instead.
+    boot = "loaddb[]" if os.path.exists(os.path.join(DB_DIR, "hearths")) else "savedb[]"
     script = f"{boot};\n{expr};\n-1 .j.j res;\nsavedb[];\nexit 0\n"
     proc = subprocess.run(
         ["q", Q_SCRIPT, "-q"],
