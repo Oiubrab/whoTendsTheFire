@@ -254,8 +254,18 @@ addauthor[`repair.migration; `authoring;
   "migrations/{nn}_change.sql"; ""; enlist `repaired]
 
 addauthor[`repair.test; `authoring;
-  "The test script shown failing above is wrong -- the feature it tests already compiles, runs, and works when invoked. Fix the TEST, not the feature. Common causes: $(...) strips trailing newlines so an expected string must not end in one; $'...' is a bashism that plain sh does not interpret. Reply with the complete corrected test script.";
+  "Either the test script shown above failed, or it passed without actually exercising the subcommand this generation just added. In the failing case: the feature already compiles, runs and works when invoked, so fix the TEST, not the feature -- common causes are $(...) stripping trailing newlines so an expected string must not end in one, and $'...' being a bashism plain sh does not interpret. In the uncovered case: the test must invoke `python3 cli.py NAME` for the exact subcommand this generation added, and check its output. Reply with the complete corrected test script.";
   "tests/gen{n}.sh"; ""; enlist `repaired]
+
+/ the HTTP twin of repair.test. Its guidance genuinely differs -- "invoke
+/ python3 cli.py NAME" is actively wrong advice for a test that is supposed
+/ to hit an endpoint, and docs/02 is explicit that different problems must
+/ not share a retry path. Found by walking g.route under a canned model:
+/ repair.test's CLI-flavoured rite was being sent for an HTTP coverage
+/ failure, which a real model would have followed straight off a cliff.
+addauthor[`repair.apitest; `authoring;
+  "Either the test script shown above failed, or it passed without actually exercising the endpoint(s) this generation just added. In the failing case: start the server on port 8071 as shown, make the request, check the status and decoded body, and fix the TEST rather than the route if the route's own checks already passed. In the uncovered case: the test must actually request the exact path(s) this generation registered, using urllib.request, and for a path with both POST and GET it must POST a record and then GET it back and assert the value is present. Reply with the complete corrected test script.";
+  "tests/api{n}.sh"; ""; enlist `repaired]
 
 / ---- validation: the gates. No model, ever ----
 / A validation torch's pass/fail is not a choice anyone gets to make: it
@@ -485,7 +495,7 @@ addedge[`g.found; `kindle.next;    `decline;     `]
 
 / ---- g.feature: one new command-line subcommand ----
 addgraph[`g.feature; `author.feature; "add one verified command-line subcommand to an existing app"]
-addto[`g.feature;] each `author.feature`verify.compile`repair.feature`verify.cli`verify.subcommands`author.demo`demo.run`author.test`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`kindle.next;
+addto[`g.feature;] each `author.feature`verify.compile`repair.feature`verify.cli`verify.subcommands`author.demo`demo.run`author.test`verify.coverage`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`kindle.next;
 addedge[`g.feature; `author.feature;    `written;  `verify.compile]
 addedge[`g.feature; `verify.compile;    `pass;     `verify.cli]
 addedge[`g.feature; `verify.compile;    `fail;     `repair.feature]
@@ -497,9 +507,11 @@ addedge[`g.feature; `verify.subcommands;`fail;     `repair.feature]
 addedge[`g.feature; `author.demo;       `written;  `demo.run]
 addedge[`g.feature; `demo.run;          `pass;     `author.test]
 addedge[`g.feature; `demo.run;          `fail;     `repair.feature]
-addedge[`g.feature; `author.test;       `written;  `test.suite]
+addedge[`g.feature; `author.test;       `written;  `verify.coverage]
+addedge[`g.feature; `verify.coverage;   `pass;     `test.suite]
+addedge[`g.feature; `verify.coverage;   `fail;     `repair.test]
 addedge[`g.feature; `test.suite;        `fail;     `repair.test]
-addedge[`g.feature; `repair.test;       `repaired; `test.suite]
+addedge[`g.feature; `repair.test;       `repaired; `verify.coverage]
 addedge[`g.feature; `test.suite;        `pass;     `tidy.run]
 addedge[`g.feature; `tidy.run;          `done;     `survey.run]
 addedge[`g.feature; `survey.run;        `done;     `docs.generate]
@@ -508,7 +520,7 @@ addedge[`g.feature; `git.commit;        `done;     `kindle.next]
 
 / ---- g.route: one new group of HTTP endpoints ----
 addgraph[`g.route; `author.route; "add one verified group of HTTP endpoints to an existing app"]
-addto[`g.route;] each `author.route`verify.compile`repair.route`verify.routes`verify.api`author.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`kindle.next;
+addto[`g.route;] each `author.route`verify.compile`repair.route`verify.routes`verify.api`author.apitest`verify.coverage`verify.roundtrip`repair.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`kindle.next;
 addedge[`g.route; `author.route;   `written;  `verify.compile]
 addedge[`g.route; `verify.compile; `pass;     `verify.routes]
 addedge[`g.route; `verify.compile; `fail;     `repair.route]
@@ -517,9 +529,14 @@ addedge[`g.route; `verify.routes;  `pass;     `verify.api]
 addedge[`g.route; `verify.routes;  `fail;     `repair.route]
 addedge[`g.route; `verify.api;     `pass;     `author.apitest]
 addedge[`g.route; `verify.api;     `fail;     `repair.route]
-addedge[`g.route; `author.apitest; `written;  `test.suite]
-addedge[`g.route; `test.suite;     `fail;     `repair.test]
-addedge[`g.route; `repair.test;    `repaired; `test.suite]
+addedge[`g.route; `author.apitest;  `written;  `verify.coverage]
+addedge[`g.route; `verify.coverage; `pass;     `verify.roundtrip]
+addedge[`g.route; `verify.coverage; `fail;     `repair.apitest]
+addedge[`g.route; `repair.apitest;  `repaired; `verify.coverage]
+addedge[`g.route; `verify.roundtrip;`pass;     `test.suite]
+addedge[`g.route; `verify.roundtrip;`fail;     `repair.route]
+addedge[`g.route; `test.suite;      `fail;     `repair.test]
+addedge[`g.route; `repair.test;      `repaired; `test.suite]
 addedge[`g.route; `test.suite;     `pass;     `tidy.run]
 addedge[`g.route; `tidy.run;       `done;     `survey.run]
 addedge[`g.route; `survey.run;     `done;     `docs.generate]
@@ -558,7 +575,7 @@ addedge[`g.schema; `git.commit;       `done;     `kindle.next]
 / The composite, and the one arrangement that produces a feature a user
 / can actually see end to end. Reuses every torch above unchanged.
 addgraph[`g.fullstack; `author.migration; "one table, the endpoints over it, and the page that shows it"]
-addto[`g.fullstack;] each `author.migration`verify.schema`repair.migration`db.migrate`author.route`verify.compile`repair.route`verify.routes`verify.api`author.view`verify.web`repair.view`author.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`kindle.next;
+addto[`g.fullstack;] each `author.migration`verify.schema`repair.migration`db.migrate`author.route`verify.compile`repair.route`verify.routes`verify.api`author.view`verify.web`repair.view`author.apitest`verify.coverage`verify.roundtrip`repair.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`kindle.next;
 addedge[`g.fullstack; `author.migration; `written;  `verify.schema]
 addedge[`g.fullstack; `verify.schema;    `fail;     `repair.migration]
 addedge[`g.fullstack; `repair.migration; `repaired; `verify.schema]
@@ -576,9 +593,14 @@ addedge[`g.fullstack; `author.view;      `written;  `verify.web]
 addedge[`g.fullstack; `verify.web;       `fail;     `repair.view]
 addedge[`g.fullstack; `repair.view;      `repaired; `verify.web]
 addedge[`g.fullstack; `verify.web;       `pass;     `author.apitest]
-addedge[`g.fullstack; `author.apitest;   `written;  `test.suite]
+addedge[`g.fullstack; `author.apitest;   `written;  `verify.coverage]
+addedge[`g.fullstack; `verify.coverage;  `pass;     `verify.roundtrip]
+addedge[`g.fullstack; `verify.coverage;  `fail;     `repair.apitest]
+addedge[`g.fullstack; `repair.apitest;   `repaired; `verify.coverage]
+addedge[`g.fullstack; `verify.roundtrip; `pass;     `test.suite]
+addedge[`g.fullstack; `verify.roundtrip; `fail;     `repair.route]
 addedge[`g.fullstack; `test.suite;       `fail;     `repair.test]
-addedge[`g.fullstack; `repair.test;      `repaired; `test.suite]
+addedge[`g.fullstack; `repair.test;       `repaired; `test.suite]
 addedge[`g.fullstack; `test.suite;       `pass;     `tidy.run]
 addedge[`g.fullstack; `tidy.run;         `done;     `survey.run]
 addedge[`g.fullstack; `survey.run;       `done;     `docs.generate]
