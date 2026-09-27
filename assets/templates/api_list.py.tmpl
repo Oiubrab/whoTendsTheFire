@@ -1,0 +1,10 @@
+"""GET /api/{{NAME}} -- every {{NAME}} row."""
+from app import crud
+
+
+def handler(req):
+    return {"{{NAME}}": crud.all_rows("{{NAME}}")}
+
+
+def register(routes):
+    routes.add("GET", "/api/{{NAME}}", handler)

@@ -1,0 +1,12 @@
+"""POST /api/{{NAME}} -- add one {{NAME}} row."""
+from app import crud
+
+FIELDS = [{{FIELD_LIST}}]
+
+
+def handler(req):
+    return 201, crud.insert("{{NAME}}", FIELDS, req.json())
+
+
+def register(routes):
+    routes.add("POST", "/api/{{NAME}}", handler)

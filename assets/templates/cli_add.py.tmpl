@@ -1,0 +1,16 @@
+"""`{{NAME}}-add` -- add one {{NAME}} row."""
+from app import crud
+
+FIELDS = [{{FIELD_LIST}}]
+
+
+def run(args):
+    data = dict((f, getattr(args, f)) for f in FIELDS)
+    row = crud.insert("{{NAME}}", FIELDS, data)
+    print("added {{NAME}} %s" % row["id"])
+
+
+def register(sub):
+    p = sub.add_parser("{{NAME}}-add", help="add a {{NAME}} record")
+{{CLI_ARGS}}
+    p.set_defaults(func=run)

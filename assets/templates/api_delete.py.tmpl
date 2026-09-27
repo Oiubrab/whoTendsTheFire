@@ -1,0 +1,11 @@
+"""DELETE /api/{{NAME}}/:id -- remove one {{NAME}} row."""
+from app import crud
+
+
+def handler(req):
+    crud.delete("{{NAME}}", crud.row_id(req))
+    return 204, {}
+
+
+def register(routes):
+    routes.add("DELETE", "/api/{{NAME}}/:id", handler)

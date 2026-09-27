@@ -1,0 +1,15 @@
+App.view("Add {{TITLE}}", function (main) {
+  var fields = [{{FIELD_LIST_JS}}];
+  var inputs = fields.map(function (f) {
+    return App.el("input", { name: f, placeholder: f });
+  });
+  var form = App.el("form", { onsubmit: function (e) {
+    e.preventDefault();
+    var data = {};
+    inputs.forEach(function (i) { data[i.getAttribute("name")] = i.value; });
+    App.api("/api/{{NAME}}", { method: "POST", body: data })
+      .then(function () { App.status("added"); inputs.forEach(function (i) { i.value = ""; }); })
+      .catch(function (err) { App.status(String(err.message || err), "error"); });
+  }}, inputs.concat([App.el("button", { "class": "go", text: "Add", type: "submit" })]));
+  main.appendChild(form);
+});

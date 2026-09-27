@@ -178,7 +178,23 @@ class Handler(BaseHTTPRequestHandler):
         req = Request(method, path, query, params, body, self.headers)
         try:
             result = fn(req)
-        except Exception:
+        except Exception as exc:
+            # app.errors.AppError subclasses carry their own real status --
+            # errors.Invalid is a 400, errors.NotFound a 404 -- and every
+            # generated route is told to raise them. as_response() existed
+            # to honour that and was never actually called here: every
+            # typed error was flattened to a bare 500 regardless of what it
+            # was. Anything that ISN'T a declared AppError is still a real
+            # bug and still gets its traceback logged and reported, rather
+            # than being laundered into a clean status code.
+            try:
+                from app import errors
+            except ImportError:
+                errors = None
+            if errors is not None and isinstance(exc, errors.AppError):
+                status, payload = errors.as_response(exc)
+                self._write(status, payload)
+                return
             tb = traceback.format_exc()
             print(tb, file=sys.stderr)
             self._write(500, {"error": "handler raised", "traceback": tb.splitlines()[-1]})

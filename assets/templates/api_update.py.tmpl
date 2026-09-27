@@ -1,0 +1,12 @@
+"""PUT /api/{{NAME}}/:id -- change one {{NAME}} row."""
+from app import crud
+
+FIELDS = [{{FIELD_LIST}}]
+
+
+def handler(req):
+    return crud.update("{{NAME}}", FIELDS, crud.row_id(req), req.json())
+
+
+def register(routes):
+    routes.add("PUT", "/api/{{NAME}}/:id", handler)

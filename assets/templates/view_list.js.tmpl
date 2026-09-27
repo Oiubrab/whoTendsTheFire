@@ -1,0 +1,7 @@
+App.view("{{TITLE}}", function (main) {
+  return App.api("/api/{{NAME}}").then(function (d) {
+    var rows = d["{{NAME}}"] || [];
+    main.appendChild(App.table(rows));
+    App.status(rows.length + " {{NAME}} record(s)");
+  });
+});

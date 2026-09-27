@@ -1,0 +1,16 @@
+"""`{{NAME}}-list` -- print every {{NAME}} row."""
+from app import crud
+
+
+def run(args):
+    rows = crud.all_rows("{{NAME}}")
+    if not rows:
+        print("no {{NAME}} records yet")
+        return
+    for row in rows:
+        print(", ".join("%s=%s" % (k, row[k]) for k in row))
+
+
+def register(sub):
+    p = sub.add_parser("{{NAME}}-list", help="list {{NAME}} records")
+    p.set_defaults(func=run)

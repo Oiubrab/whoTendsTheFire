@@ -1,0 +1,25 @@
+#!/bin/sh
+# Round-trip for {{NAME}}: write one through the API, read it back, demand it.
+# Rendered from assets/templates/test_roundtrip.sh.tmpl.
+python3 serve.py --port {{PORT}} >/dev/null 2>&1 &
+SRV=$!
+i=0
+while [ $i -lt 40 ]; do
+  python3 -c 'import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(("127.0.0.1",{{PORT}}))==0 else 1)' && break
+  i=$((i+1))
+  sleep 0.2
+done
+out=$(python3 - <<'PYEOF'
+import json, urllib.request
+BASE = "http://127.0.0.1:{{PORT}}/api/{{NAME}}"
+body = json.dumps({{SAMPLE_JSON}}).encode()
+req = urllib.request.Request(BASE, data=body, method="POST")
+req.add_header("Content-Type", "application/json")
+urllib.request.urlopen(req).read()
+got = urllib.request.urlopen(BASE).read().decode()
+print({{NEEDLE}} in got)
+PYEOF
+)
+kill $SRV 2>/dev/null
+[ "$out" = "True" ] || { echo "{{NAME}} round trip failed: $out"; exit 1; }
+echo "{{NAME}} round trip ok"

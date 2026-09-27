@@ -626,6 +626,7 @@ async function kindleFrom(node) {
     await light(node.id, chosenGraph);
     pid = spawned.pid;
     currentState = spawned.state;
+    saveSession();
     updateSidebar();
     await refreshLineage();
     await refreshCode();
@@ -694,6 +695,7 @@ async function autoRun() {
         await light(id, p.graph);
         pid = spawned.pid;
         currentState = spawned.state;
+        saveSession();
         updateSidebar();
         await refreshLineage();
         await refreshCode();
@@ -806,6 +808,60 @@ async function loadGraph() {
   render();
 }
 
+// pid/hearth live only in this tab's JS memory -- a reload (or a crash,
+// or just closing the tab) drops them with no way to find the hearth
+// again, even though the bridge itself still has every bit of state and
+// the run was never actually lost. autoRun is entirely client-driven --
+// there is no server-side process walking the graph for the UI path the
+// way agent.py is for the CLI -- so losing the tab doesn't lose work,
+// it just PAUSES the lineage wherever it was, with nothing left running
+// until some tab reconnects and resumes driving it.
+const SESSION_KEY = "whoTendsTheFire.session";
+
+function saveSession() {
+  try {
+    if (pid && hearth) localStorage.setItem(SESSION_KEY, JSON.stringify({ pid, hearth }));
+  } catch (e) { /* private browsing / storage disabled -- just don't persist */ }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+
+async function reconnectSession() {
+  let saved;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    saved = JSON.parse(raw);
+  } catch (e) { return; }
+  if (!saved || !saved.pid) return;
+  try {
+    const st = await api("GET", `/api/state?pid=${encodeURIComponent(saved.pid)}`);
+    pid = saved.pid;
+    hearth = saved.hearth;
+    currentState = st;
+    $("#invocation").value = st.invocation || st.ember || "";
+    updateSidebar();
+    await refreshLineage();
+    await refreshCode();
+    render();
+    const fr = (st.frontier || []).filter(Boolean);
+    if (fr.length) {
+      toast(`reconnected to generation ${st.generation} — resuming`, "ok");
+      if ($("#auto-chk").checked) autoRun();
+      else status(`reconnected, paused at ${fr.join(", ")}`, false);
+    } else {
+      toast(`reconnected to generation ${st.generation} — prophecy already complete`, "ok");
+    }
+  } catch (e) {
+    // the saved pid no longer resolves -- a wiped or rebuilt db/, most
+    // likely -- so there is nothing to reconnect to. Drop it quietly
+    // rather than showing a stale error on every future page load.
+    clearSession();
+  }
+}
+
 $("#begin-btn").onclick = async () => {
   const invocation = $("#invocation").value.trim();
   if (!invocation) { toast("enter an invocation first"); return; }
@@ -814,6 +870,7 @@ $("#begin-btn").onclick = async () => {
     pid = res.pid;
     hearth = res.hearth;
     currentState = res.state;
+    saveSession();
     updateSidebar();
     await refreshLineage();
     await refreshCode();
@@ -830,6 +887,7 @@ $("#reset-btn").onclick = () => {
   pid = null;
   hearth = null;
   currentState = null;
+  clearSession();
   resetView();
   $("#sb-ember").textContent = "No hearth lit yet.";
   $("#sb-invocation").textContent = "—";
@@ -844,7 +902,7 @@ $("#reset-btn").onclick = () => {
   render();
 };
 
-loadGraph().catch(e => toast(e.message));
+loadGraph().then(reconnectSession).catch(e => toast(e.message));
 </script>
 </body>
 </html>
