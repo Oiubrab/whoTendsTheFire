@@ -92,7 +92,8 @@
     background:
       radial-gradient(circle at 50% 40%, #1e1712 0%, var(--bg) 70%);
   }
-  svg { width: 100%; height: 100%; display: block; }
+  svg { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  svg.panning { cursor: grabbing; }
   aside {
     width: 430px;
     border-left: 1px solid var(--panel-border);
@@ -298,6 +299,86 @@ let graph = { nodes: [], edges: [] };
 let pos = {};
 let pid = null;
 let hearth = null;
+
+// pan/zoom. render() rebuilds the whole SVG from scratch on every light
+// (svg.innerHTML = ""), so the camera state has to live OUTSIDE that --
+// otherwise every torch lighting up would snap the view back to origin.
+let viewX = 0, viewY = 0, viewScale = 1;
+const MIN_SCALE = 0.15, MAX_SCALE = 4;
+
+function applyView() {
+  const vp = $("#viewport");
+  if (vp) vp.setAttribute("transform", `translate(${viewX},${viewY}) scale(${viewScale})`);
+}
+
+function resetView() {
+  viewX = 0; viewY = 0; viewScale = 1;
+  applyView();
+}
+
+// screen (clientX/Y) -> svg user-space coordinates, accounting for the
+// element's own on-screen size (which differs from its internal
+// coordinate space once CSS/flex sizing is involved).
+function toSvgPoint(clientX, clientY) {
+  const r = svg.getBoundingClientRect();
+  return { x: clientX - r.left, y: clientY - r.top };
+}
+
+(function setupPanZoom() {
+  let dragging = false, dragged = false;
+  let startX = 0, startY = 0, startViewX = 0, startViewY = 0;
+
+  svg.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    const p = toSvgPoint(ev.clientX, ev.clientY);
+    // the point under the cursor, in the CURRENT (pre-zoom) world space
+    const worldX = (p.x - viewX) / viewScale;
+    const worldY = (p.y - viewY) / viewScale;
+    const factor = Math.exp(-ev.deltaY * 0.0015);
+    viewScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, viewScale * factor));
+    // re-solve translate so that same world point lands back under the
+    // cursor -- this is what makes it "zoom toward the mouse" rather
+    // than zoom toward the corner.
+    viewX = p.x - worldX * viewScale;
+    viewY = p.y - worldY * viewScale;
+    applyView();
+  }, { passive: false });
+
+  svg.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) return;
+    dragging = true; dragged = false;
+    startX = ev.clientX; startY = ev.clientY;
+    startViewX = viewX; startViewY = viewY;
+    svg.setPointerCapture(ev.pointerId);
+    svg.classList.add("panning");
+  });
+
+  svg.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (!dragged && Math.hypot(dx, dy) > 3) dragged = true;
+    if (dragged) {
+      viewX = startViewX + dx;
+      viewY = startViewY + dy;
+      applyView();
+    }
+  });
+
+  function endDrag(ev) {
+    if (!dragging) return;
+    dragging = false;
+    svg.classList.remove("panning");
+    if (dragged) {
+      // a drag that moved the camera must not ALSO register as a click
+      // on whatever node happens to be under the cursor at release --
+      // capture-phase so this runs before the node's own listener.
+      const suppress = (e) => { e.stopPropagation(); svg.removeEventListener("click", suppress, true); };
+      svg.addEventListener("click", suppress, true);
+    }
+  }
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
+})();
 let currentState = null;
 
 function toast(msg, kind) {
@@ -398,6 +479,12 @@ function neighborsOf(id) {
 
 function render() {
   svg.innerHTML = "";
+  // everything the layout draws goes into this group, never straight into
+  // <svg>, so applyView()'s transform (persisted across re-renders, since
+  // this function is called after every single torch lights) pans/zooms
+  // the whole picture at once rather than being wiped out each time.
+  const viewport = el("g", { id: "viewport" }, svg);
+  applyView();
   const litSet = new Set((currentState && currentState.trail || []).map(r => r.torch));
   const frontierSet = new Set((currentState && currentState.frontier) || []);
   let neighborSet = new Set();
@@ -426,9 +513,9 @@ function render() {
     el("line", {
       class: "edge" + (hot ? " hot" : ""),
       x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-    }, svg);
+    }, viewport);
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    el("text", { class: "edge-label", x: mx, y: my - 4 }, svg).textContent = e.label;
+    el("text", { class: "edge-label", x: mx, y: my - 4 }, viewport).textContent = e.label;
   });
 
   // end pseudo-node -- frontier holds "" (the terminal symbol) once a walk finishes
@@ -441,8 +528,8 @@ function render() {
       stroke: ended ? "var(--lit-glow)" : "var(--edge)",
       "stroke-width": 1.5,
       style: ended ? "filter: drop-shadow(0 0 10px var(--lit-glow))" : "",
-    }, svg);
-    el("text", { x: p.x, y: p.y + 20 }, svg).textContent = "end";
+    }, viewport);
+    el("text", { x: p.x, y: p.y + 20 }, viewport).textContent = "end";
   }
 
   // nodes
@@ -456,7 +543,7 @@ function render() {
     if (n.id === workingTorch) cls.push("working");
     if (isLit) cls.push("lit");
     if (isFrontier) cls.push("frontier", "clickable");
-    const g = el("g", { class: cls.join(" "), transform: `translate(${p.x},${p.y})` }, svg);
+    const g = el("g", { class: cls.join(" "), transform: `translate(${p.x},${p.y})` }, viewport);
 
     let fill = "var(--unlit)";
     let stroke = kindColor(n.kind);
@@ -743,6 +830,7 @@ $("#reset-btn").onclick = () => {
   pid = null;
   hearth = null;
   currentState = null;
+  resetView();
   $("#sb-ember").textContent = "No hearth lit yet.";
   $("#sb-invocation").textContent = "—";
   $("#sb-gen").textContent = "";
