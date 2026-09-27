@@ -77,6 +77,7 @@ addtorch[`scaffold.shared; `action; "";
 scaf[`scaffold.shared; "app/config.py"]
 scaf[`scaffold.shared; "app/log.py"]
 scaf[`scaffold.shared; "app/errors.py"]
+scaf[`scaffold.shared; "app/crud.py"]
 addrequire[`scaffold.shared; `tree]
 addprovide[`scaffold.shared; `; `shared]
 
@@ -121,8 +122,34 @@ scaf[`scaffold.tools; "tools/schemacheck.py"]
 scaf[`scaffold.tools; "tools/packagecheck.py"]
 scaf[`scaffold.tools; "tools/roundtrip.py"]
 scaf[`scaffold.tools; "tools/coverage.py"]
+scaf[`scaffold.tools; "tools/parseresource.py"]
+scaf[`scaffold.tools; "tools/checkresource.py"]
+scaf[`scaffold.tools; "tools/resource.py"]
 addrequire[`scaffold.tools; `tree]
 addprovide[`scaffold.tools; `; `tools]
+
+/ eleven tiny templates, one artifact each -- a table, one HTTP verb's
+/ handler, a CLI list, a CLI add, a list view, an add-form view, a
+/ round-trip test. Kept as their own capability rather than folded into
+/ scaffold.tools: tools/resource.py is code, these are the data it reads,
+/ and a torch that needs one should not have to require the other by
+/ accident of bundling.
+addtorch[`scaffold.templates; `action; ""; "python3 tools/resource.py selftest"; enlist `done]
+scaf[`scaffold.templates; "templates/table.sql.tmpl"]
+scaf[`scaffold.templates; "templates/api_list.py.tmpl"]
+scaf[`scaffold.templates; "templates/api_create.py.tmpl"]
+scaf[`scaffold.templates; "templates/api_get.py.tmpl"]
+scaf[`scaffold.templates; "templates/api_update.py.tmpl"]
+scaf[`scaffold.templates; "templates/api_delete.py.tmpl"]
+scaf[`scaffold.templates; "templates/cli_list.py.tmpl"]
+scaf[`scaffold.templates; "templates/cli_add.py.tmpl"]
+scaf[`scaffold.templates; "templates/view_list.js.tmpl"]
+scaf[`scaffold.templates; "templates/view_form.js.tmpl"]
+scaf[`scaffold.templates; "templates/test_roundtrip.sh.tmpl"]
+scaf[`scaffold.templates; "templates/test_cli.sh.tmpl"]
+addrequire[`scaffold.templates; `tools]
+addrequire[`scaffold.templates; `shared]
+addprovide[`scaffold.templates; `; `templates]
 
 / the test harness. Runs every test ever written, not just the newest.
 addtorch[`scaffold.tests; `action; ""; "chmod +x run_tests.sh"; enlist `done]
@@ -419,9 +446,9 @@ addtool[`git.commit; `; `git; "command -v git"; "true"]
 / it answers from is SURVEY.txt, which survey.run has already derived from
 / the code -- so even the context for this call is law, not narration.
 addtorch[`kindle.next; `kindling;
-  "This generation is finished and verified. SURVEY.txt above is an inventory of what the codebase actually contains now, derived from the code itself.\n\nChoose which arrangement the next generation should walk:\n  g.feature   -- add one new command-line subcommand\n  g.route     -- add one new group of HTTP endpoints\n  g.view      -- add one new page to the browser front end\n  g.schema    -- add one new database table, with migration\n  g.fullstack -- a table, the endpoints over it, and a page for it\n  g.harden    -- no new behaviour: tidy, re-verify, regenerate the docs\n  g.document  -- regenerate documentation and check packaging\n  decline     -- this lineage has nothing worthwhile left to do\n\nPick the one that best serves the ember, given what already exists. Prefer g.harden if the survey shows broken modules or quarantined tests. Then name in one sentence the single most worthwhile thing for that generation to build.";
+  "This generation is finished and verified. SURVEY.txt above is an inventory of what the codebase actually contains now, derived from the code itself.\n\nChoose which arrangement the next generation should walk:\n  g.feature   -- add one new command-line subcommand\n  g.route     -- add one new group of HTTP endpoints\n  g.view      -- add one new page to the browser front end\n  g.schema    -- add one new database table, with migration\n  g.fullstack -- a table, the endpoints over it, and a page for it, free-form\n  g.resource  -- the same shape as g.fullstack, but templated: prefer this whenever the next thing is an ordinary CRUD resource\n  g.harden    -- no new behaviour: tidy, re-verify, regenerate the docs\n  g.document  -- regenerate documentation and check packaging\n  decline     -- this lineage has nothing worthwhile left to do\n\nPick the one that best serves the ember, given what already exists. Prefer g.resource over g.fullstack whenever the next thing is a plain resource with a table, an API and a page -- it is deterministic and cannot misfire the way free-form authoring can. Prefer g.harden if the survey shows broken modules or quarantined tests. Then name in one sentence the single most worthwhile thing for that generation to build.";
   "";
-  `g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document`decline]
+  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document`decline]
 
 / ================= the graph library =================
 / Nine arrangements over the one vocabulary above. `members` is
@@ -443,7 +470,7 @@ addtorch[`kindle.next; `kindling;
 / surface, which storage, which licence. Twenty torches, exactly one of
 / which needs a model for anything but a menu pick.
 addgraph[`g.found; `choose.surface; "found a project: pick surface, storage and licence, then install everything that follows from them"]
-addto[`g.found;] each `choose.surface`scaffold.tree`choose.storage`scaffold.store`scaffold.db`scaffold.shared`scaffold.tools`scaffold.cli`scaffold.serve`scaffold.web`scaffold.tests`scaffold.fixture`scaffold.readme`scaffold.pyproject`choose.license`verify.compile`survey.run`docs.generate`git.commit`kindle.next;
+addto[`g.found;] each `choose.surface`scaffold.tree`choose.storage`scaffold.store`scaffold.db`scaffold.shared`scaffold.tools`scaffold.templates`scaffold.cli`scaffold.serve`scaffold.web`scaffold.tests`scaffold.fixture`scaffold.readme`scaffold.pyproject`choose.license`verify.compile`survey.run`docs.generate`git.commit`kindle.next;
 
 addedge[`g.found; `choose.surface; `cli;  `scaffold.tree]
 addedge[`g.found; `choose.surface; `http; `scaffold.tree]
@@ -468,7 +495,8 @@ addedge[`g.found; `scaffold.shared;`done; `scaffold.tools]
 / controls is what gets BUILT and CHECKED, and that gating lives on the
 / authoring and validation torches, where a missing capability means the
 / work is never attempted rather than attempted and skipped.
-addedge[`g.found; `scaffold.tools; `done; `scaffold.cli]
+addedge[`g.found; `scaffold.tools; `done; `scaffold.templates]
+addedge[`g.found; `scaffold.templates; `done; `scaffold.cli]
 addedge[`g.found; `scaffold.cli;   `done; `scaffold.serve]
 addedge[`g.found; `scaffold.serve; `done; `scaffold.web]
 addedge[`g.found; `scaffold.web;   `done; `scaffold.tests]
@@ -489,6 +517,7 @@ addedge[`g.found; `kindle.next;    `g.route;     `]
 addedge[`g.found; `kindle.next;    `g.view;      `]
 addedge[`g.found; `kindle.next;    `g.schema;    `]
 addedge[`g.found; `kindle.next;    `g.fullstack; `]
+addedge[`g.found; `kindle.next;    `g.resource;  `]
 addedge[`g.found; `kindle.next;    `g.harden;    `]
 addedge[`g.found; `kindle.next;    `g.document;  `]
 addedge[`g.found; `kindle.next;    `decline;     `]
@@ -656,7 +685,7 @@ addedge[`g.document; `git.commit;     `done; `kindle.next]
 / fifty-six lines of identical wiring, and the one that gets mistyped is
 / the one that silently sterilises a lineage.
 {[g] {[g;lbl] addedge[g; `kindle.next; lbl; `]}[g] each
-  `g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document`decline
+  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document`decline
  } each `g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document;
 
 / ---- capability gates on the checks themselves ----
@@ -672,6 +701,103 @@ addrequire[`demo.run; `surface.cli]
 addrequire[`verify.routes; `surface.http]
 addrequire[`verify.api; `surface.http]
 addrequire[`verify.web; `web]
+
+/ ---- resources: CRUD without a single free-form authoring call ----
+/ Every generated CRUD module observed in this project turned out to be
+/ structurally identical -- same register()/routes.add() skeleton, same
+/ db.query/db.execute calls, varying only in a table name and its fields.
+/ That is not invention; it is one narrow naming choice expressed five
+/ ways. The model states the choice once, as a single line of grammar
+/ (parseresource.py), and eleven tiny `action` torches -- one per
+/ artifact, never one script that writes several files at once -- render
+/ it from real template files (assets/templates/*.tmpl) with nothing more
+/ than string substitution. No model writes a line of the output.
+/ A law-generated file that fails its check is a template bug, not
+/ something a repair torch can fix by guessing -- it never wrote the file
+/ and has no more insight into it than the same guess a validation gate
+/ already ran. Those checks dead-end on failure, the same pattern g.schema
+/ and g.harden already use for law that has nothing left for a model to
+/ try. Only the spec line itself -- the one place a genuine, if narrow,
+/ choice was made -- gets a repair path.
+
+addauthor[`author.resourcespec; `authoring;
+  "Name ONE new resource for this app: a table, and the fields it holds. Reply with EXACTLY one line in this grammar and nothing else:\n\n  name: field:type, field:type, ...\n\ntypes are text, integer, real, or boolean. Do not declare id or created_at -- both are added automatically. Look at SURVEY.txt above: the name must not collide with a table that already exists. Pick something that serves the ember and is not already built.";
+  ".resource-spec.txt"; ""; enlist `written]
+addrequire[`author.resourcespec; `surface.cli]
+addrequire[`author.resourcespec; `surface.http]
+addrequire[`author.resourcespec; `store.sqlite]
+
+addtorch[`verify.resourcespec; `validation; ""; "python3 tools/checkresource.py"; `pass`fail]
+
+addauthor[`repair.resourcespec; `authoring;
+  "The resource spec above was rejected -- the error is shown. Reply with EXACTLY one corrected line in the same grammar: name: field:type, field:type, ... (types: text, integer, real, boolean; id and created_at are automatic, never declare them; the name must not collide with an existing table).";
+  ".resource-spec.txt"; ""; enlist `repaired]
+
+/ eleven emit torches. Each is `python3 tools/resource.py emit ARTIFACT` --
+/ one template, one output file, nothing else. This is the grain: an
+/ if-statement's worth of work, not a module's worth.
+addtorch[`emit.table;         `action; ""; "python3 tools/resource.py emit table";          enlist `done]
+addtorch[`emit.api.list;      `action; ""; "python3 tools/resource.py emit api-list";       enlist `done]
+addtorch[`emit.api.create;    `action; ""; "python3 tools/resource.py emit api-create";     enlist `done]
+addtorch[`emit.api.get;       `action; ""; "python3 tools/resource.py emit api-get";        enlist `done]
+addtorch[`emit.api.update;    `action; ""; "python3 tools/resource.py emit api-update";     enlist `done]
+addtorch[`emit.api.delete;    `action; ""; "python3 tools/resource.py emit api-delete";     enlist `done]
+addtorch[`emit.cli.list;      `action; ""; "python3 tools/resource.py emit cli-list";       enlist `done]
+addtorch[`emit.cli.add;       `action; ""; "python3 tools/resource.py emit cli-add";        enlist `done]
+addtorch[`emit.view.list;     `action; ""; "python3 tools/resource.py emit view-list";      enlist `done]
+addtorch[`emit.view.form;     `action; ""; "python3 tools/resource.py emit view-form";      enlist `done]
+addtorch[`emit.test.roundtrip;`action; ""; "python3 tools/resource.py emit test-roundtrip"; enlist `done]
+addtorch[`emit.test.cli;      `action; ""; "python3 tools/resource.py emit test-cli";      enlist `done]
+
+addgraph[`g.resource; `author.resourcespec; "add one CRUD resource -- a table, its API, a CLI command and a page -- with no free-form authoring"]
+addto[`g.resource;] each `author.resourcespec`verify.resourcespec`repair.resourcespec`emit.table`verify.schema`emit.api.list`emit.api.create`emit.api.get`emit.api.update`emit.api.delete`verify.compile`verify.routes`verify.api`emit.cli.list`emit.cli.add`verify.cli`verify.subcommands`emit.test.cli`emit.view.list`emit.view.form`verify.web`emit.test.roundtrip`test.suite`repair.apitest`verify.roundtrip`verify.coverage`tidy.run`survey.run`docs.generate`git.commit`kindle.next;
+
+addedge[`g.resource; `author.resourcespec; `written;  `verify.resourcespec]
+addedge[`g.resource; `verify.resourcespec; `fail;     `repair.resourcespec]
+addedge[`g.resource; `repair.resourcespec; `repaired; `verify.resourcespec]
+addedge[`g.resource; `verify.resourcespec; `pass;     `emit.table]
+addedge[`g.resource; `emit.table;          `done;     `verify.schema]
+addedge[`g.resource; `verify.schema;       `fail;     `]
+addedge[`g.resource; `verify.schema;       `pass;     `emit.api.list]
+addedge[`g.resource; `emit.api.list;       `done;     `emit.api.create]
+addedge[`g.resource; `emit.api.create;     `done;     `emit.api.get]
+addedge[`g.resource; `emit.api.get;        `done;     `emit.api.update]
+addedge[`g.resource; `emit.api.update;     `done;     `emit.api.delete]
+addedge[`g.resource; `emit.api.delete;     `done;     `verify.compile]
+addedge[`g.resource; `verify.compile;      `fail;     `]
+addedge[`g.resource; `verify.compile;      `pass;     `verify.routes]
+addedge[`g.resource; `verify.routes;       `fail;     `]
+addedge[`g.resource; `verify.routes;       `pass;     `verify.api]
+addedge[`g.resource; `verify.api;          `fail;     `]
+addedge[`g.resource; `verify.api;          `pass;     `emit.cli.list]
+addedge[`g.resource; `emit.cli.list;       `done;     `emit.cli.add]
+addedge[`g.resource; `emit.cli.add;        `done;     `verify.cli]
+addedge[`g.resource; `verify.cli;          `fail;     `]
+addedge[`g.resource; `verify.cli;          `pass;     `verify.subcommands]
+addedge[`g.resource; `verify.subcommands;  `fail;     `]
+addedge[`g.resource; `verify.subcommands;  `pass;     `emit.test.cli]
+addedge[`g.resource; `emit.test.cli;       `done;     `emit.view.list]
+addedge[`g.resource; `emit.view.list;      `done;     `emit.view.form]
+addedge[`g.resource; `emit.view.form;      `done;     `verify.web]
+addedge[`g.resource; `verify.web;          `fail;     `]
+addedge[`g.resource; `verify.web;          `pass;     `emit.test.roundtrip]
+addedge[`g.resource; `emit.test.roundtrip; `done;     `test.suite]
+addedge[`g.resource; `test.suite;          `fail;     `repair.apitest]
+addedge[`g.resource; `repair.apitest;      `repaired; `test.suite]
+addedge[`g.resource; `test.suite;          `pass;     `verify.roundtrip]
+addedge[`g.resource; `verify.roundtrip;    `fail;     `]
+addedge[`g.resource; `verify.roundtrip;    `pass;     `verify.coverage]
+addedge[`g.resource; `verify.coverage;     `fail;     `]
+addedge[`g.resource; `verify.coverage;     `pass;     `tidy.run]
+addedge[`g.resource; `tidy.run;            `done;     `survey.run]
+addedge[`g.resource; `survey.run;          `done;     `docs.generate]
+addedge[`g.resource; `docs.generate;       `done;     `git.commit]
+addedge[`g.resource; `git.commit;          `done;     `kindle.next]
+
+/ every kindling menu is wired per graph -- g.resource needs the same
+/ treatment the other seven graphs already got.
+{[lbl] addedge[`g.resource; `kindle.next; lbl; `]} each
+  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document`decline;
 
 / ---- integrity: the library checks itself ----
 / A graph is data, and malformed data here does not raise -- it silently

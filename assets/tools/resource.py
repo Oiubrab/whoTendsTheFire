@@ -12,11 +12,15 @@ assembled shell and JSON by nesting quotes inside Python %-formatting and
 shipped two escaping bugs in a row. A template you can run, lint and read
 as an ordinary file cannot hide that class of mistake.
 
-Spec grammar, one line, in resource.spec:
+Spec grammar, one line, in .resource-spec.txt:
 
     name: field:type, field:type, ...
 
 types: text | integer | real | boolean. id and created_at are automatic.
+The grammar itself lives in parseresource.py, shared with checkresource.py
+(the validation-torch gate) so the two can never disagree about what a
+valid spec looks like -- this file only renders once a spec has already
+passed that gate.
 
     python3 tools/resource.py check
     python3 tools/resource.py emit api-create
@@ -30,12 +34,12 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "templates"
-SPEC_FILE = ROOT / "resource.spec"
+SPEC_FILE = ROOT / ".resource-spec.txt"
 PORT = "8072"
 
-NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-TYPES = {"text", "integer", "real", "boolean"}
-RESERVED = {"id", "created_at"}
+sys.path.insert(0, str(ROOT / "tools"))
+from parseresource import parse as parse_spec, SpecError  # noqa: E402
+
 SQL_TYPE = {"text": "text", "integer": "integer", "real": "real", "boolean": "integer"}
 SQL_DEFAULT = {"text": "''", "integer": "0", "real": "0.0", "boolean": "0"}
 PY_ARGTYPE = {"integer": ", type=int", "real": ", type=float", "boolean": ", type=int"}
@@ -43,52 +47,9 @@ SAMPLE = {"text": '"sample"', "integer": "1", "real": "1.5", "boolean": "1"}
 SAMPLE_TEXT = {"text": "sample", "integer": "1", "real": "1.5", "boolean": "1"}
 
 
-class SpecError(ValueError):
-    pass
-
-
-def parse_spec(line):
-    line = line.strip()
-    if not line:
-        raise SpecError("spec is empty")
-    if ":" not in line:
-        raise SpecError("no ':' -- expected 'name: field:type, ...'")
-    name, _, rest = line.partition(":")
-    name = name.strip()
-    if not NAME_RE.match(name):
-        raise SpecError("resource name %r must be lowercase_with_underscores" % name)
-    if name in RESERVED:
-        raise SpecError("resource name %r is reserved" % name)
-
-    fields, seen = [], set()
-    for part in rest.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if ":" not in part:
-            raise SpecError("field %r has no type (expected name:type)" % part)
-        fname, _, ftype = part.partition(":")
-        fname, ftype = fname.strip(), ftype.strip()
-        if not NAME_RE.match(fname):
-            raise SpecError("field name %r must be lowercase_with_underscores" % fname)
-        if fname in RESERVED:
-            raise SpecError("field %r is added automatically; do not declare it" % fname)
-        if ftype not in TYPES:
-            raise SpecError("field %r has type %r; use one of %s"
-                            % (fname, ftype, ", ".join(sorted(TYPES))))
-        if fname in seen:
-            raise SpecError("field %r declared twice" % fname)
-        seen.add(fname)
-        fields.append((fname, ftype))
-
-    if not fields:
-        raise SpecError("no fields declared -- need at least one")
-    return name, fields
-
-
 def read_spec():
     if not SPEC_FILE.exists():
-        raise SpecError("resource.spec does not exist yet")
+        raise SpecError(".resource-spec.txt does not exist yet")
     return parse_spec(SPEC_FILE.read_text())
 
 
@@ -120,6 +81,9 @@ def tokens(name, fields):
             for f, t in fields),
         "SAMPLE_JSON": "{" + ", ".join('"%s": %s' % (f, SAMPLE[t]) for f, t in fields) + "}",
         "NEEDLE": '"%s"' % SAMPLE_TEXT[fields[0][1]],
+        "NEEDLE_BARE": SAMPLE_TEXT[fields[0][1]],
+        "CLI_SAMPLE_ARGS": " ".join(
+            "--%s %s" % (f, SAMPLE_TEXT[t]) for f, t in fields),
     }
 
 
@@ -147,6 +111,7 @@ ARTIFACTS = {
     "view-list":     ("view_list.js.tmpl",     lambda n: "web/views/%s_list.js" % n),
     "view-form":     ("view_form.js.tmpl",     lambda n: "web/views/%s_form.js" % n),
     "test-roundtrip": ("test_roundtrip.sh.tmpl", lambda n: "tests/%s_roundtrip.sh" % n),
+    "test-cli":      ("test_cli.sh.tmpl",      lambda n: "tests/%s_cli.sh" % n),
 }
 
 

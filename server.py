@@ -20,7 +20,15 @@ import urllib.request
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 Q_SCRIPT = os.path.join(REPO, "q", "torches.q")
-DB_DIR = os.path.join(REPO, "db")
+# overridable so an isolated test bridge cannot silently write into the
+# real repo's db/ -- RUNS_OVERRIDE already isolated where a test
+# prophecy's FILES went, but every test bridge run this session still
+# shared the real db/ regardless, quietly accumulating test hearths in
+# it. q's own savedb/loaddb read this same variable (as DB_OVERRIDE,
+# inherited automatically since subprocess.run here passes no explicit
+# env=), so setting it once here is enough for both sides to agree.
+DB_DIR = os.environ.get("DB_OVERRIDE") or os.path.join(REPO, "db")
+os.makedirs(DB_DIR, exist_ok=True)
 RUNS_DIR = os.environ.get("RUNS_OVERRIDE") or os.path.join(REPO, "runs")
 UI_DIR = os.path.join(REPO, "ui")
 
@@ -193,6 +201,13 @@ kill $SRV
 
 FAKE_KINDLES = []
 
+# One spec per generation, so a canned multi-generation run through
+# g.resource exercises a distinct table each time rather than colliding
+# with itself on the second pass.
+FAKE_RESOURCE_SPECS = ["widget: label:text, qty:integer, done:boolean",
+                       "invoice: item:text, amount:real"]
+FAKE_RESOURCE_CALLS = []
+
 
 def fake_answer(prompt, target=None):
     import re as _re
@@ -220,13 +235,17 @@ def fake_answer(prompt, target=None):
             return FAKE_FEATURE.replace('"count"', '"count%s"' % n)
         if target.endswith(".sh"):
             return FAKE_DEMO
+        if target == ".resource-spec.txt":
+            i = min(len(FAKE_RESOURCE_CALLS), len(FAKE_RESOURCE_SPECS) - 1)
+            FAKE_RESOURCE_CALLS.append(1)
+            return FAKE_RESOURCE_SPECS[i]
     # the kindling call: two lines, a graph and a sentence, same as the
     # real model is asked for. Cycling the graphs is deliberate -- a
     # harness that only ever exercises one arrangement proves nothing
     # about the other seven.
     if "GRAPH:" in prompt:
         FAKE_KINDLES.append(1)
-        order = ["g.feature", "g.harden", "g.document"]
+        order = ["g.feature", "g.resource", "g.harden", "g.document"]
         i = len(FAKE_KINDLES) - 1
         if i >= len(order):
             return "DECLINE"

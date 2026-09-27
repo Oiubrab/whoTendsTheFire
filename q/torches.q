@@ -864,18 +864,29 @@ race: {[hid;g;muts;scratch]
 / got an empty frontier -- g.found didn't exist in what got loaded --
 / and nothing said why. The library must never be able to go stale
 / relative to its own source file.
+/ overridable so an isolated test run cannot silently write into the real
+/ repo's db/ -- server.py's RUNS_OVERRIDE already isolated where a test
+/ prophecy's FILES went, but every test bridge this session still shared
+/ the SAME db/ regardless of that, quietly accumulating test hearths in
+/ the real one. DB_OVERRIDE is read here as an environment variable
+/ because server.py's run_q spawns a fresh q process per call with no
+/ explicit env=, which means it already inherits the parent's environment
+/ -- setting DB_OVERRIDE once when launching the bridge is enough for
+/ both sides to agree on where state lives.
+DBDIR: {[] d: getenv `DB_OVERRIDE; $[0 = count d; "db"; d]}[]
+
 savedb: {[]
-  `:db/hearths set hearths;
-  `:db/prophecies set prophecies;
-  `:db/chronicle set chronicle;
-  `:db/laststatus set laststatus; }
+  (hsym `$DBDIR,"/hearths") set hearths;
+  (hsym `$DBDIR,"/prophecies") set prophecies;
+  (hsym `$DBDIR,"/chronicle") set chronicle;
+  (hsym `$DBDIR,"/laststatus") set laststatus; }
 
 loaddb: {[]
-  hearths::get `:db/hearths;
-  prophecies::get `:db/prophecies;
-  chronicle::get `:db/chronicle;
+  hearths::get hsym `$DBDIR,"/hearths";
+  prophecies::get hsym `$DBDIR,"/prophecies";
+  chronicle::get hsym `$DBDIR,"/chronicle";
   / guarded: a db/ written before laststatus existed has no file for it.
   / Falling back to the fresh empty table declared above, rather than
   / letting a missing file crash every single boot of an existing hearth.
-  laststatus::@[{get `:db/laststatus}; ::;
+  laststatus::@[{get hsym `$DBDIR,"/laststatus"}; ::;
     {([prophecy:`symbol$()] torch:`symbol$(); option:`symbol$(); output:())}]; }

@@ -15,6 +15,7 @@ these racing in separate sandboxes cannot collide.
 
 import json
 import pathlib
+import re
 import socket
 import subprocess
 import sys
@@ -61,16 +62,9 @@ def declared_routes():
     return out
 
 
-def sample_body(path):
-    """A minimal plausible JSON body for a write route."""
-    return json.dumps({"name": "smoke", "value": 1}).encode()
-
-
-def request(port, method, path):
+def request(port, method, path, body=None):
     url = "http://127.0.0.1:%d%s" % (port, path)
-    data = None
-    if method in ("POST", "PUT", "PATCH"):
-        data = sample_body(path)
+    data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if data:
         req.add_header("Content-Type", "application/json")
@@ -83,10 +77,65 @@ def request(port, method, path):
         return 0, str(e).encode()
 
 
-def concretize(path):
-    for a in (":id", "{id}", "<id>"):
-        path = path.replace(a, "1")
+ID_TOKENS = (":id", "{id}", "<id>")
+
+
+def id_base(path):
+    """The resource path a :id-style route hangs off of, or None."""
+    for tok in ID_TOKENS:
+        if tok in path:
+            return path.split(tok)[0].rstrip("/")
+    return None
+
+
+def concretize(path, rid):
+    for tok in ID_TOKENS:
+        path = path.replace(tok, str(rid))
     return path
+
+
+MISSING_RE = re.compile(r"missing field\(s\):\s*(.+)", re.IGNORECASE)
+
+
+def post_with_retry(port, path):
+    """POST to path, discovering required fields from the handler's own
+    complaint rather than guessing a fixed shape. errors.Invalid on a
+    generated CRUD route says exactly "missing field(s): a, b, c" -- this
+    reads that back and retries with a placeholder for each one, so the
+    same probe works for any resource's field list, not just one shape.
+    Returns (status, body) of the last attempt.
+    """
+    body = {}
+    status, resp = 0, b""
+    for _ in range(3):
+        status, resp = request(port, "POST", path, body)
+        if status == 400:
+            try:
+                detail = json.loads(resp).get("detail", "")
+            except (ValueError, TypeError):
+                detail = resp.decode("utf-8", "replace")
+            m = MISSING_RE.search(detail)
+            if m:
+                added = False
+                for f in (x.strip() for x in m.group(1).split(",")):
+                    if f and f not in body:
+                        body[f] = "smoke"
+                        added = True
+                if added:
+                    continue
+        break
+    return status, resp
+
+
+def post_seed(port, path):
+    """The id of the row a successful post_with_retry created, or None."""
+    status, resp = post_with_retry(port, path)
+    if status not in (200, 201):
+        return None
+    try:
+        return json.loads(resp).get("id")
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def main():
@@ -119,10 +168,43 @@ def main():
         else:
             print("ok   GET /api/health -> 200 (%d bytes)" % len(body))
 
-        for r in declared_routes():
-            path = concretize(r["path"])
-            method = r.get("method") or "GET"
-            status, body = request(port, method, path)
+        # DELETE checked last among routes sharing an id_base: a delete
+        # that runs before a GET/PUT on the same seeded row would consume
+        # it, and the GET's subsequent 404 is then a correct response to
+        # a row that really is gone, not a routing failure -- but nothing
+        # here can tell those apart after the fact, so the only fix is to
+        # not delete the shared row until everything else has used it.
+        routes = sorted(declared_routes(),
+                        key=lambda r: (r.get("method") or "GET") == "DELETE")
+        posts = {r["path"] for r in routes if (r.get("method") or "GET") == "POST"}
+        seeded = {}  # base path -> real row id, or None if seeding failed
+
+        for r in routes:
+            raw, method = r["path"], r.get("method") or "GET"
+            base = id_base(raw)
+            if base is not None:
+                if base not in seeded:
+                    seeded[base] = post_seed(port, base) if base in posts else None
+                rid = seeded[base]
+                if rid is None:
+                    # nothing to substitute with; fall back to a guess so
+                    # this still checks the route answers SOMETHING, but
+                    # a resulting 404 here is not held against the route --
+                    # there is no way to know if id 1 ought to exist.
+                    path = concretize(raw, 1)
+                else:
+                    path = concretize(raw, rid)
+            else:
+                path = raw
+
+            if method == "POST":
+                # same field-discovery retry as the seeding pass, so a
+                # plain create route gets a fair try rather than being
+                # probed with an empty body and marked "ok" on a 400 that
+                # only means nothing was supplied.
+                status, body = post_with_retry(port, path)
+            else:
+                status, body = request(port, method, path)
             checks += 1
             label = "%s %s" % (method, path)
             if status == 0:
@@ -131,9 +213,18 @@ def main():
             elif status >= 500:
                 print("FAIL %s -> %d\n%s" % (label, status, body.decode()[:400]))
                 failures += 1
-            elif status == 404:
+            elif status == 404 and (base is None or seeded.get(base) is not None):
+                # a real row was seeded (or this path never needed one) and
+                # the route still 404d -- that IS a routing failure, not a
+                # legitimate "no such record" response.
                 print("FAIL %s -> 404, declared but not served" % label)
                 failures += 1
+            elif status == 404:
+                print("ok   %s -> 404 (no seed row available to test against)" % label)
+            elif status in (204, 304):
+                # no content is the CORRECT body for these statuses -- an
+                # empty response here is success, not a failure to answer.
+                print("ok   %s -> %d (no content)" % (label, status))
             elif not body:
                 print("FAIL %s -> %d with empty body" % (label, status))
                 failures += 1

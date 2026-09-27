@@ -1,0 +1,8 @@
+#!/bin/sh
+# CLI round trip for {{NAME}}: add one record, list, demand it shows up.
+# Rendered from assets/templates/test_cli.sh.tmpl.
+out=$(python3 cli.py {{NAME}}-add {{CLI_SAMPLE_ARGS}} 2>&1)
+echo "$out" | grep -q "added {{NAME}}" || { echo "cli.py {{NAME}}-add failed: $out"; exit 1; }
+listed=$(python3 cli.py {{NAME}}-list 2>&1)
+echo "$listed" | grep -q "{{NEEDLE_BARE}}" || { echo "cli.py {{NAME}}-list did not show the added row: $listed"; exit 1; }
+echo "{{NAME}} cli round trip ok"

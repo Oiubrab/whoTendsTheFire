@@ -18,6 +18,7 @@ failed: there is nothing to read back through.
 """
 
 import json
+import re
 import pathlib
 import socket
 import subprocess
@@ -109,10 +110,37 @@ def main():
         for path in writeonly:
             print("skip %s has POST but no GET -- nothing to read back through" % path)
 
+        missing_re = re.compile(r"missing field\(s\):\s*(.+)", re.IGNORECASE)
         failures = 0
         for path in both:
             value = "%s-%s" % (MARKER, path.strip("/").replace("/", "-"))
-            status, body = call(port, "POST", path, {"name": value, "value": value})
+            # a generated CRUD route's actual field names are not known
+            # here, and guessing {"name", "value"} only ever matched a
+            # route that happened to be called exactly that. Start with
+            # that guess, but if the handler names what it actually wants
+            # -- errors.Invalid says "missing field(s): a, b, c" -- retry
+            # with the marker in every one of them, so this works for any
+            # resource's field list rather than one fixed shape.
+            body_json = {"name": value, "value": value}
+            status, body = call(port, "POST", path, body_json)
+            for _ in range(2):
+                if status != 400:
+                    break
+                try:
+                    detail = json.loads(body).get("detail", "")
+                except (ValueError, TypeError):
+                    detail = body.decode("utf-8", "replace") if isinstance(body, bytes) else str(body)
+                m = missing_re.search(detail)
+                if not m:
+                    break
+                added = False
+                for f in (x.strip() for x in m.group(1).split(",")):
+                    if f and f not in body_json:
+                        body_json[f] = value
+                        added = True
+                if not added:
+                    break
+                status, body = call(port, "POST", path, body_json)
             if status == 0:
                 print("FAIL POST %s -> no response (%s)" % (path, body[:120]))
                 failures += 1
@@ -122,8 +150,8 @@ def main():
                 failures += 1
                 continue
             if status >= 400:
-                print("FAIL POST %s -> %d, would not accept {\"name\": ...}\n     %s"
-                      % (path, status, body[:300]))
+                print("FAIL POST %s -> %d, would not accept %r\n     %s"
+                      % (path, status, body_json, body[:300]))
                 failures += 1
                 continue
 

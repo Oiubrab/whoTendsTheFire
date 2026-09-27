@@ -1,5 +1,7 @@
 #!/bin/sh
-# Round-trip for {{NAME}}: write one through the API, read it back, demand it.
+# Round-trip for {{NAME}}: write one through the API, read it back both as
+# the list (GET /api/{{NAME}}) and as the single row (GET /api/{{NAME}}/:id),
+# demand it in both.
 # Rendered from assets/templates/test_roundtrip.sh.tmpl.
 python3 serve.py --port {{PORT}} >/dev/null 2>&1 &
 SRV=$!
@@ -14,12 +16,18 @@ import json, urllib.request
 BASE = "http://127.0.0.1:{{PORT}}/api/{{NAME}}"
 body = json.dumps({{SAMPLE_JSON}}).encode()
 req = urllib.request.Request(BASE, data=body, method="POST")
-req.add_header("Content-Type", "application/json")
-urllib.request.urlopen(req).read()
-got = urllib.request.urlopen(BASE).read().decode()
-print({{NEEDLE}} in got)
+created = json.loads(urllib.request.urlopen(req).read().decode())
+rid = created.get("id")
+
+got_list = urllib.request.urlopen(BASE).read().decode()
+in_list = {{NEEDLE}} in got_list
+
+got_one = urllib.request.urlopen(BASE + "/" + str(rid)).read().decode()
+in_one = {{NEEDLE}} in got_one
+
+print(in_list and in_one)
 PYEOF
 )
 kill $SRV 2>/dev/null
 [ "$out" = "True" ] || { echo "{{NAME}} round trip failed: $out"; exit 1; }
-echo "{{NAME}} round trip ok"
+echo "{{NAME}} round trip ok (GET /api/{{NAME}} and GET /api/{{NAME}}/:id both showed it)"
