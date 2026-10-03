@@ -3,10 +3,11 @@ models/
 *.gguf
 .env
 db/
+db-archive/
+db.*/
 runs/
 .kx/*
 __pycache__/
-db.*/
 .torch-output
 resource.spec
 .resource-spec.txt

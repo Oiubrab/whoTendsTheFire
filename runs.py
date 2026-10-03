@@ -9,8 +9,9 @@ from one that was killed after two minutes.
 Everything needed is already recorded -- the hearths table has `born` and
 the ember, prophecies have generation and invocation. The complication is
 that each schema change moved db aside, so the history is spread across
-db/ and every db.* backup. This reads all of them, joins against what is
-actually on disk, and writes runs/INDEX.md.
+db/ (the live one) and every old snapshot archived under db-archive/.
+This reads all of them, joins against what is actually on disk, and
+writes runs/INDEX.md.
 
     python3 runs.py            # print the index
     python3 runs.py --write    # also write runs/INDEX.md
@@ -46,10 +47,19 @@ def q_json(dbdir, expr):
 
 
 def gather():
-    """Every hearth we have any record of, from every db snapshot."""
+    """Every hearth we have any record of, from every db snapshot.
+
+    The live db/ sits at the repo root; every superseded snapshot (one
+    per schema change, back when this file's docstring called them
+    db.pre-X) is archived under db-archive/<name>/ to keep the root from
+    accumulating one directory per historical schema. Both are scanned
+    the same way, just at different depths.
+    """
     seen = {}
-    dbs = [d for d in os.listdir(REPO)
-           if d == "db" or d.startswith("db.")]
+    dbs = ["db"] if os.path.isdir(os.path.join(REPO, "db")) else []
+    archive = os.path.join(REPO, "db-archive")
+    if os.path.isdir(archive):
+        dbs += [os.path.join("db-archive", d) for d in os.listdir(archive)]
     for d in sorted(dbs):
         full = os.path.join(REPO, d)
         if not os.path.exists(os.path.join(full, "hearths")):
