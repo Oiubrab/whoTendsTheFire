@@ -299,6 +299,11 @@ let graph = { nodes: [], edges: [] };
 let pos = {};
 let pid = null;
 let hearth = null;
+// the sentence kindle.next wrote, waiting for choose.graph to classify
+// it. Module-scoped rather than local to autoRun() so a Stop click (or
+// a reload) landing in the one step between the two kindling torches
+// doesn't silently lose it -- saveSession persists it the same as pid.
+let pendingInvocation = null;
 
 // pan/zoom. render() rebuilds the whole SVG from scratch on every light
 // (svg.innerHTML = ""), so the camera state has to live OUTSIDE that --
@@ -603,27 +608,35 @@ function openPicker(node, ev) {
 }
 
 async function kindleFrom(node) {
-  // a kindling torch asks what to build next, then spawns a daughter
-  // prophecy and moves the view into it. The engine refuses if the
-  // hearth is out of budget, and that refusal surfaces as a toast.
-  // node.graph is not reliable here -- kindle.next belongs to 7
-  // different graphs, and a human driving this manually (no model call
-  // to ask) needs to pick one explicitly rather than get whichever one
-  // the layout happened to resolve first.
-  const offerable = (currentState && currentState.offerable || []).filter(g => g !== "g.found");
-  const menu = offerable.length ? offerable : (graph.nodes.length ? [node.graph] : []);
-  const graphChoice = prompt(
-    `Which arrangement should the daughter walk?\n${menu.join(", ")}`,
-    menu[0] || node.graph);
-  if (graphChoice === null) return;
-  const chosenGraph = menu.includes(graphChoice.trim()) ? graphChoice.trim() : menu[0];
+  // a kindling torch asks what to build next, then a SEPARATE
+  // choose.graph torch asks which arrangement fits it, then this spawns
+  // a daughter prophecy and moves the view into it. Sentence first,
+  // classification second -- same order as the model-driven path, and
+  // for the same reason: picking an arrangement is a much more grounded
+  // task once a concrete sentence to match it against already exists.
   const proposed = prompt(node.rite || "What should the next prophecy build?");
   if (proposed === null) return;
   const invocation = proposed.trim();
   if (!invocation) { await light(node.id, "decline"); return; }
+  await light(node.id, "written");
+  pendingInvocation = invocation;
+  saveSession();
+  await refreshCode();
+
+  // node.graph is not reliable here -- choose.graph belongs to every
+  // graph in the library, and a human driving this manually needs to
+  // pick one explicitly rather than get whichever one the layout
+  // happened to resolve first.
+  const offerable = (currentState && currentState.offerable || []).filter(g => g !== "g.found");
+  const menu = offerable.length ? offerable : (graph.nodes.length ? [node.graph] : []);
+  const graphChoice = prompt(
+    `Which arrangement fits:\n${invocation}\n\nOptions: ${menu.join(", ")}`,
+    menu[0] || node.graph);
+  if (graphChoice === null) return;
+  const chosenGraph = menu.includes(graphChoice.trim()) ? graphChoice.trim() : menu[0];
   try {
     const spawned = await api("POST", "/api/kindle", { pid, invocation, graph: chosenGraph });
-    await light(node.id, chosenGraph);
+    await light("choose.graph", chosenGraph);
     pid = spawned.pid;
     currentState = spawned.state;
     saveSession();
@@ -634,7 +647,6 @@ async function kindleFrom(node) {
     toast(`kindled generation ${spawned.state.generation}`, "ok");
   } catch (e) {
     toast(e.message);
-    await light(node.id, "decline");
   }
 }
 
@@ -679,20 +691,29 @@ async function autoRun() {
       } else if (node.kind === "kindling") {
         status(`${id}: asking what to build next…`, true);
         const p = await api("POST", "/api/propose", { pid, torch: id });
-        if (p.decline) {
+        if (!p.invocation) {
           status("nothing further proposed — lineage ends here", false);
           await light(id, "decline");
           break;
         }
-        // kindle.next's options ARE the library's graph ids (g.feature,
-        // g.route, ...), not a generic "spawn" -- that was the old
-        // two-graph library's shape. Lighting it with whatever the model
-        // actually chose keeps the chronicle an honest record of what
-        // happened, rather than an option that no longer exists.
-        status(`kindling ${p.graph}: ${p.invocation}`, true);
+        pendingInvocation = p.invocation;
+        saveSession();
+        status(`proposes building: ${p.invocation}`, true);
+        await light(id, "written");
+        await refreshCode();
+
+      } else if (id === "choose.graph") {
+        // the second half of kindling: which arrangement fits the
+        // sentence kindle.next just wrote. Reached only after a
+        // `written` light, so pendingInvocation is always set here.
+        status(`${id}: choosing which arrangement fits…`, true);
+        const c = await api("POST", "/api/choosegraph",
+          { pid, torch: id, invocation: pendingInvocation });
+        status(`kindling ${c.option}: ${pendingInvocation}`, true);
         const spawned = await api("POST", "/api/kindle",
-          { pid, invocation: p.invocation, graph: p.graph });
-        await light(id, p.graph);
+          { pid, invocation: pendingInvocation, graph: c.option });
+        await light(id, c.option);
+        pendingInvocation = null;
         pid = spawned.pid;
         currentState = spawned.state;
         saveSession();
@@ -820,7 +841,7 @@ const SESSION_KEY = "whoTendsTheFire.session";
 
 function saveSession() {
   try {
-    if (pid && hearth) localStorage.setItem(SESSION_KEY, JSON.stringify({ pid, hearth }));
+    if (pid && hearth) localStorage.setItem(SESSION_KEY, JSON.stringify({ pid, hearth, pendingInvocation }));
   } catch (e) { /* private browsing / storage disabled -- just don't persist */ }
 }
 
@@ -840,6 +861,7 @@ async function reconnectSession() {
     const st = await api("GET", `/api/state?pid=${encodeURIComponent(saved.pid)}`);
     pid = saved.pid;
     hearth = saved.hearth;
+    pendingInvocation = saved.pendingInvocation || null;
     currentState = st;
     $("#invocation").value = st.invocation || st.ember || "";
     updateSidebar();

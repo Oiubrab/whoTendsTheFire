@@ -458,21 +458,41 @@ addtorch[`verify.progress; `validation; ""; "python3 tools/progresscheck.py"; `p
 
 / ---- kindling: reproduction, and the only executive call in the library ----
 / docs/04: kindling asks "what should we build next?", the dynamo asks
-/ "what torch is missing?". This is the former, and it is deliberately as
-/ rigid as every other torch here. The model does exactly two things, both
-/ of which it is genuinely good at and neither of which is invention:
-/   1. it picks ONE arrangement from the library -- a closed menu, and the
-/      options below are literally the graph ids, so the menu IS the
-/      library index and cannot drift out of step with it
-/   2. it writes ONE sentence: the invocation the daughter will carry
-/ It does not choose where the daughter works, what torches exist, how
-/ they are wired, or whether its own output was acceptable. The overview
-/ it answers from is SURVEY.txt, which survey.run has already derived from
-/ the code -- so even the context for this call is law, not narration.
+/ "what torch is missing?". This is the former.
+/ Split into two torches, not one asking for two things at once. The
+/ original kindle.next asked the model to pick a graph AND write a
+/ sentence in the same response, and across a real lineage of five
+/ kindling calls the sentence was right every time ("build a Habit CRUD
+/ resource") while the graph was wrong every time (g.harden, which has
+/ no authoring torch at all -- nothing was ever built). Same call, same
+/ response, one half reliable and the other not. That is exactly the
+/ failure docs/01's law/choice/invention split exists to prevent: this
+/ torch was asking for a CHOICE and an INVENTION in one breath, the one
+/ place in this library doing that, and the one place choosing failed.
+/ Now: kindle.next writes ONLY the sentence -- what to build, nothing
+/ about how. choose.graph runs second, shown that sentence, and picks
+/ ONLY which arrangement fits it -- a closed menu, nothing else, the
+/ same shape as choose.surface or choose.storage, neither of which has
+/ misfired all session. Classifying a sentence that already exists
+/ against a fixed menu is a grounded task; inventing the sentence and
+/ picking the label simultaneously was not.
 addtorch[`kindle.next; `kindling;
-  "This generation is finished and verified. SURVEY.txt above is an inventory of what the codebase actually contains now, derived from the code itself.\n\nChoose which arrangement the next generation should walk:\n  g.feature   -- add one new command-line subcommand\n  g.route     -- add one new group of HTTP endpoints\n  g.view      -- add one new page to the browser front end\n  g.schema    -- add one new database table, with migration\n  g.fullstack -- a table, the endpoints over it, and a page for it, free-form\n  g.resource  -- the same shape as g.fullstack, but templated: prefer this whenever the next thing is an ordinary CRUD resource\n  g.harden    -- no new behaviour: tidy, re-verify, regenerate the docs\n  g.document  -- regenerate documentation and check packaging\n  decline     -- this lineage has nothing worthwhile left to do\n\nPick the one that best serves the ember, given what already exists. Prefer g.resource over g.fullstack whenever the next thing is a plain resource with a table, an API and a page -- it is deterministic and cannot misfire the way free-form authoring can. Prefer g.harden if the survey shows broken modules or quarantined tests, but NEVER if SURVEY.txt shows zero subcommands and zero routes -- an app with nothing built yet has nothing for g.harden to harden, and a test suite reporting \"no tests found\" at that stage means nothing has been built, not that something broke; in that case the thing to do is build it, with g.feature, g.route, g.schema, g.fullstack, or g.resource. Then name in one sentence the single most worthwhile thing for that generation to build.";
+  "This generation is finished and verified. SURVEY.txt above is an inventory of what the codebase actually contains now, derived from the code itself.\n\nName in ONE sentence the single most worthwhile thing to build next, given what already exists and what the ember is ultimately for. Do not say how or where -- only what. If nothing worthwhile remains, reply with exactly: DECLINE";
   "";
-  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document`decline]
+  `written`decline]
+
+/ the graph ids ARE the options, so this menu cannot drift out of step
+/ with the library the way a hand-maintained list could.
+/ the sentence kindle.next just wrote is not part of this rite's text --
+/ rites are static, and that sentence does not exist until the previous
+/ torch has already run. The caller (agent.py / server.py) prepends
+/ "The next generation will build this: <sentence>" ahead of this rite
+/ when it builds the prompt, the same way an authoring torch's caller
+/ appends its target path rather than baking it into the rite.
+addtorch[`choose.graph; `decision;
+  "Which arrangement fits what the next generation is about to build?\n  g.feature   -- add one new command-line subcommand\n  g.route     -- add one new group of HTTP endpoints\n  g.view      -- add one new page to the browser front end\n  g.schema    -- add one new database table, with migration\n  g.fullstack -- a table, the endpoints over it, and a page for it, free-form\n  g.resource  -- the same shape as g.fullstack, but templated: prefer this whenever the thing to build is an ordinary CRUD resource -- it is deterministic and cannot misfire the way free-form authoring can\n  g.harden    -- no new behaviour: tidy, re-verify, regenerate the docs. Only fits if the thing to build is polishing or fixing something that already exists, never if it is something new\n  g.document  -- regenerate documentation and check packaging";
+  "";
+  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document]
 
 / ================= the graph library =================
 / Nine arrangements over the one vocabulary above. `members` is
@@ -494,7 +514,7 @@ addtorch[`kindle.next; `kindling;
 / surface, which storage, which licence. Twenty torches, exactly one of
 / which needs a model for anything but a menu pick.
 addgraph[`g.found; `choose.surface; "found a project: pick surface, storage and licence, then install everything that follows from them"]
-addto[`g.found;] each `choose.surface`scaffold.tree`choose.storage`scaffold.store`scaffold.db`scaffold.shared`scaffold.tools`scaffold.templates`scaffold.cli`scaffold.serve`scaffold.web`scaffold.tests`scaffold.fixture`scaffold.readme`scaffold.pyproject`choose.license`verify.compile`survey.run`docs.generate`git.commit`verify.progress`kindle.next;
+addto[`g.found;] each `choose.surface`scaffold.tree`choose.storage`scaffold.store`scaffold.db`scaffold.shared`scaffold.tools`scaffold.templates`scaffold.cli`scaffold.serve`scaffold.web`scaffold.tests`scaffold.fixture`scaffold.readme`scaffold.pyproject`choose.license`verify.compile`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
 
 addedge[`g.found; `choose.surface; `cli;  `scaffold.tree]
 addedge[`g.found; `choose.surface; `http; `scaffold.tree]
@@ -538,19 +558,12 @@ addedge[`g.found; `docs.generate;  `done; `git.commit]
 addedge[`g.found; `git.commit;      `done;     `verify.progress]
 addedge[`g.found; `verify.progress; `pass;     `kindle.next]
 addedge[`g.found; `verify.progress; `fail;     `]
-addedge[`g.found; `kindle.next;    `g.feature;   `]
-addedge[`g.found; `kindle.next;    `g.route;     `]
-addedge[`g.found; `kindle.next;    `g.view;      `]
-addedge[`g.found; `kindle.next;    `g.schema;    `]
-addedge[`g.found; `kindle.next;    `g.fullstack; `]
-addedge[`g.found; `kindle.next;    `g.resource;  `]
-addedge[`g.found; `kindle.next;    `g.harden;    `]
-addedge[`g.found; `kindle.next;    `g.document;  `]
+addedge[`g.found; `kindle.next;    `written;     `choose.graph]
 addedge[`g.found; `kindle.next;    `decline;     `]
 
 / ---- g.feature: one new command-line subcommand ----
 addgraph[`g.feature; `author.feature; "add one verified command-line subcommand to an existing app"]
-addto[`g.feature;] each `author.feature`verify.compile`repair.feature`verify.cli`verify.subcommands`author.demo`demo.run`author.test`verify.coverage`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next;
+addto[`g.feature;] each `author.feature`verify.compile`repair.feature`verify.cli`verify.subcommands`author.demo`demo.run`author.test`verify.coverage`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.feature; `author.feature;    `written;  `verify.compile]
 addedge[`g.feature; `verify.compile;    `pass;     `verify.cli]
 addedge[`g.feature; `verify.compile;    `fail;     `repair.feature]
@@ -577,7 +590,7 @@ addedge[`g.feature; `verify.progress; `fail;     `]
 
 / ---- g.route: one new group of HTTP endpoints ----
 addgraph[`g.route; `author.route; "add one verified group of HTTP endpoints to an existing app"]
-addto[`g.route;] each `author.route`verify.compile`repair.route`verify.routes`verify.api`author.apitest`verify.coverage`verify.roundtrip`repair.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next;
+addto[`g.route;] each `author.route`verify.compile`repair.route`verify.routes`verify.api`author.apitest`verify.coverage`verify.roundtrip`repair.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.route; `author.route;   `written;  `verify.compile]
 addedge[`g.route; `verify.compile; `pass;     `verify.routes]
 addedge[`g.route; `verify.compile; `fail;     `repair.route]
@@ -604,7 +617,7 @@ addedge[`g.route; `verify.progress; `fail;     `]
 
 / ---- g.view: one new page in the browser front end ----
 addgraph[`g.view; `author.view; "add one page to the browser front end, structurally checked"]
-addto[`g.view;] each `author.view`verify.web`repair.view`verify.api`survey.run`git.commit`verify.progress`kindle.next;
+addto[`g.view;] each `author.view`verify.web`repair.view`verify.api`survey.run`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.view; `author.view;  `written;  `verify.web]
 addedge[`g.view; `verify.web;   `fail;     `repair.view]
 addedge[`g.view; `repair.view;  `repaired; `verify.web]
@@ -618,7 +631,7 @@ addedge[`g.view; `verify.progress; `fail;     `]
 
 / ---- g.schema: one new database table ----
 addgraph[`g.schema; `author.migration; "add one database table via a migration, verified by reading the schema back"]
-addto[`g.schema;] each `author.migration`verify.schema`repair.migration`db.migrate`verify.compile`test.suite`survey.run`docs.generate`git.commit`verify.progress`kindle.next;
+addto[`g.schema;] each `author.migration`verify.schema`repair.migration`db.migrate`verify.compile`test.suite`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.schema; `author.migration; `written;  `verify.schema]
 addedge[`g.schema; `verify.schema;    `fail;     `repair.migration]
 addedge[`g.schema; `repair.migration; `repaired; `verify.schema]
@@ -638,7 +651,7 @@ addedge[`g.schema; `verify.progress; `fail;     `]
 / The composite, and the one arrangement that produces a feature a user
 / can actually see end to end. Reuses every torch above unchanged.
 addgraph[`g.fullstack; `author.migration; "one table, the endpoints over it, and the page that shows it"]
-addto[`g.fullstack;] each `author.migration`verify.schema`repair.migration`db.migrate`author.route`verify.compile`repair.route`verify.routes`verify.api`author.view`verify.web`repair.view`author.apitest`verify.coverage`verify.roundtrip`repair.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next;
+addto[`g.fullstack;] each `author.migration`verify.schema`repair.migration`db.migrate`author.route`verify.compile`repair.route`verify.routes`verify.api`author.view`verify.web`repair.view`author.apitest`verify.coverage`verify.roundtrip`repair.apitest`test.suite`repair.test`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.fullstack; `author.migration; `written;  `verify.schema]
 addedge[`g.fullstack; `verify.schema;    `fail;     `repair.migration]
 addedge[`g.fullstack; `repair.migration; `repaired; `verify.schema]
@@ -679,7 +692,7 @@ addedge[`g.fullstack; `verify.progress; `fail;     `]
 / what it already does, which is the kind of generation a week-long run
 / needs and the kind no prompt-driven harness ever chooses to spend.
 addgraph[`g.harden; `tidy.run; "spend a generation improving what exists: tidy, recompile, re-verify, re-document"]
-addto[`g.harden;] each `tidy.run`verify.tidy`compile.all`verify.compile`verify.cli`verify.subcommands`verify.routes`test.suite`docs.generate`verify.docs`survey.run`git.commit`verify.progress`kindle.next;
+addto[`g.harden;] each `tidy.run`verify.tidy`compile.all`verify.compile`verify.cli`verify.subcommands`verify.routes`test.suite`docs.generate`verify.docs`survey.run`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.harden; `tidy.run;        `done; `verify.tidy]
 addedge[`g.harden; `verify.tidy;     `pass; `compile.all]
 addedge[`g.harden; `verify.tidy;     `fail; `compile.all]
@@ -708,7 +721,7 @@ addedge[`g.harden; `verify.progress; `fail;     `]
 / from the code by a script, so there is nothing here for a model to
 / write and nothing for it to get wrong.
 addgraph[`g.document; `docs.generate; "regenerate derived documentation and check that the project describes itself correctly"]
-addto[`g.document;] each `docs.generate`verify.docs`verify.package`survey.run`git.commit`verify.progress`kindle.next;
+addto[`g.document;] each `docs.generate`verify.docs`verify.package`survey.run`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.document; `docs.generate;  `done; `verify.docs]
 addedge[`g.document; `verify.docs;    `pass; `verify.package]
 addedge[`g.document; `verify.docs;    `fail; `survey.run]
@@ -721,12 +734,19 @@ addedge[`g.document; `verify.progress; `fail;     `]
 
 / Every kindling torch needs its menu wired in whatever graph it sits in,
 / or the option resolves to nothing and the daughter is never offered.
-/ Done in a loop rather than by hand: eight labels across seven graphs is
-/ fifty-six lines of identical wiring, and the one that gets mistyped is
-/ the one that silently sterilises a lineage.
-{[g] {[g;lbl] addedge[g; `kindle.next; lbl; `]}[g] each
-  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document`decline
- } each `g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document;
+/ Done in a loop rather than by hand: the one that gets mistyped by hand
+/ is the one that silently sterilises a lineage.
+/ kindle.next now only ever has two options (written/decline) in every
+/ graph, so this is two edges per graph rather than the former nine.
+/ choose.graph's menu is the same seven graph ids in every graph it
+/ appears in -- wired in the same loop, since it is the torch that
+/ carries the old nine-way branch now.
+{[g]
+  addedge[g; `kindle.next; `written; `choose.graph];
+  addedge[g; `kindle.next; `decline; `];
+  {[g;lbl] addedge[g; `choose.graph; lbl; `]}[g] each
+    `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document
+ } each `g.found`g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document`g.resource;
 
 / ---- capability gates on the checks themselves ----
 / Declared here, after the graphs, because they are about the graphs: a
@@ -790,7 +810,7 @@ addtorch[`emit.test.roundtrip;`action; ""; "python3 tools/resource.py emit test-
 addtorch[`emit.test.cli;      `action; ""; "python3 tools/resource.py emit test-cli";      enlist `done]
 
 addgraph[`g.resource; `author.resourcespec; "add one CRUD resource -- a table, its API, a CLI command and a page -- with no free-form authoring"]
-addto[`g.resource;] each `author.resourcespec`verify.resourcespec`repair.resourcespec`emit.table`verify.schema`emit.api.list`emit.api.create`emit.api.get`emit.api.update`emit.api.delete`verify.compile`verify.routes`verify.api`emit.cli.list`emit.cli.add`verify.cli`verify.subcommands`emit.test.cli`emit.view.list`emit.view.form`verify.web`emit.test.roundtrip`test.suite`repair.apitest`verify.roundtrip`verify.coverage`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next;
+addto[`g.resource;] each `author.resourcespec`verify.resourcespec`repair.resourcespec`emit.table`verify.schema`emit.api.list`emit.api.create`emit.api.get`emit.api.update`emit.api.delete`verify.compile`verify.routes`verify.api`emit.cli.list`emit.cli.add`verify.cli`verify.subcommands`emit.test.cli`emit.view.list`emit.view.form`verify.web`emit.test.roundtrip`test.suite`repair.apitest`verify.roundtrip`verify.coverage`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
 
 addedge[`g.resource; `author.resourcespec; `written;  `verify.resourcespec]
 addedge[`g.resource; `verify.resourcespec; `fail;     `repair.resourcespec]
@@ -836,10 +856,8 @@ addedge[`g.resource; `git.commit;      `done;     `verify.progress]
 addedge[`g.resource; `verify.progress; `pass;     `kindle.next]
 addedge[`g.resource; `verify.progress; `fail;     `]
 
-/ every kindling menu is wired per graph -- g.resource needs the same
-/ treatment the other seven graphs already got.
-{[lbl] addedge[`g.resource; `kindle.next; lbl; `]} each
-  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document`decline;
+/ g.resource's kindle.next/choose.graph wiring is now handled in the
+/ shared loop above, alongside the other eight graphs.
 
 / ---- integrity: the library checks itself ----
 / A graph is data, and malformed data here does not raise -- it silently
@@ -915,15 +933,28 @@ libcheck: {[]
       enlist "authoring torch ",string[tid]," declares no target"]
     } each exec id from torches where kind=`authoring;
 
-  / a decision torch whose options change nothing was not a decision
-  problems,: raze {[tid]
+  / a decision torch whose options change nothing was not a decision.
+  / One exception: a torch whose options are ALL valid graph ids (like
+  / choose.graph) is inherently consequential -- it picks which
+  / arrangement the lineage walks next -- even though that consequence
+  / is read by the orchestration layer from the chronicle rather than
+  / expressed as a file or a capability. kindle.next's own options were
+  / graph ids under the same exemption before this check existed; it
+  / simply never applied to kindling-kind torches, which is why nobody
+  / had to say so until a decision-kind torch took over that job.
+  / gids must be passed into the lambda explicitly -- q lambdas do not
+  / close over an enclosing function's LOCALS the way they do globals,
+  / only their own parameters, so a bare reference to it here would
+  / look for a global named gids and throw when it found none.
+  problems,: raze {[tid;gids]
     opts: torches[tid]`options;
-    consequences: distinct raze {[tid;o]
-      (exec path from files where torch=tid, option=o),
-      (string exec capability from provides where torch=tid, option=o) }[tid] each opts;
-    $[0 < count consequences; ();
-      enlist "decision torch ",string[tid]," has options with no consequences"]
-    } each exec id from torches where kind=`decision;
+    $[all opts in gids; ();
+      [consequences: distinct raze {[tid;o]
+         (exec path from files where torch=tid, option=o),
+         (string exec capability from provides where torch=tid, option=o) }[tid] each opts;
+       $[0 < count consequences; ();
+         enlist "decision torch ",string[tid]," has options with no consequences"]]]
+    }[;exec distinct id from graphs where lib=`main] each exec id from torches where kind=`decision;
 
   problems }
 

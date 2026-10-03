@@ -209,14 +209,17 @@ FAKE_RESOURCE_SPECS = ["widget: label:text, qty:integer, done:boolean",
 FAKE_RESOURCE_CALLS = []
 
 
-def fake_answer(prompt, target=None):
+def fake_answer(prompt, target=None, torch=None):
     import re as _re
     """Canned but REAL artifacts -- they must actually compile, run and
     pass, or the harness proves nothing about the pipeline.
 
-    Keyed on the target path, not on prompt text: the brief embeds the
-    current source, so every prompt contains "register(sub)" and matching
-    on content returned Python for the .sh targets."""
+    Keyed on the target path or the torch id, never on prompt text: the
+    brief embeds the current source and the chronicle, so prompt-sniffing
+    has broken twice already -- once when "register(sub)" appeared in
+    every prompt and matched the wrong branch, once when the chronicle's
+    own "choose.surface -> both" line satisfied a later torch's check
+    meant for a different question entirely."""
     if target:
         m = _re.search(r"(\d+)", os.path.basename(target))
         n = m.group(1) if m else "1"
@@ -239,17 +242,25 @@ def fake_answer(prompt, target=None):
             i = min(len(FAKE_RESOURCE_CALLS), len(FAKE_RESOURCE_SPECS) - 1)
             FAKE_RESOURCE_CALLS.append(1)
             return FAKE_RESOURCE_SPECS[i]
-    # the kindling call: two lines, a graph and a sentence, same as the
-    # real model is asked for. Cycling the graphs is deliberate -- a
-    # harness that only ever exercises one arrangement proves nothing
-    # about the other seven.
-    if "GRAPH:" in prompt:
+    # kindle.next and choose.graph are two separate calls now, not one --
+    # the first writes the sentence and advances FAKE_KINDLES, the second
+    # reads the SAME position back to answer consistently with it. Cycling
+    # the graphs is deliberate -- a harness that only ever exercises one
+    # arrangement proves nothing about the other seven.
+    order = ["g.feature", "g.resource", "g.harden", "g.document"]
+    if torch == "kindle.next":
+        i = len(FAKE_KINDLES)
         FAKE_KINDLES.append(1)
-        order = ["g.feature", "g.resource", "g.harden", "g.document"]
-        i = len(FAKE_KINDLES) - 1
         if i >= len(order):
             return "DECLINE"
-        return "GRAPH: %s\nNEXT: Add a subcommand that reports the newest row." % order[i]
+        return "Add a subcommand that reports the newest row."
+    if torch == "choose.graph":
+        i = len(FAKE_KINDLES) - 1
+        if 0 <= i < len(order):
+            want = order[i]
+            if want in prompt:
+                return want
+        return ""
     return "done"
 FINAL = "<|channel|>final<|message|>"
 
@@ -393,9 +404,9 @@ def resolve_target(target, tid, st):
     return target.replace("{nn}", "%03d" % gen).replace("{n}", str(gen))
 
 
-def ask_model(prompt, num_predict=6000, effort=None, target=None):
+def ask_model(prompt, num_predict=6000, effort=None, target=None, torch=None):
     if FAKE_MODEL:
-        return fake_answer(prompt, target)
+        return fake_answer(prompt, target, torch)
     """effort="low" cuts gpt-oss's analysis-channel reasoning, which is
     ~30% of wall clock on mechanical tasks (measured: 120s -> 84s) and
     buys nothing when the job is 'write four shell commands'."""
@@ -567,66 +578,67 @@ class Handler(http.server.BaseHTTPRequestHandler):
                               + (f"Its question: {t['rite']}\n" if t["rite"] else "")
                               + "Choose exactly one of these and reply with ONLY that text:\n"
                               + ", ".join(opts) + "\n\nOption:")
-                    reply = ask_model(prompt, num_predict=600) or ""
+                    reply = ask_model(prompt, num_predict=600, torch=tid) or ""
                     pick = next((o for o in opts if o.lower() in reply.lower()), opts[0])
                     self._send_json({"option": pick, "asked": True, "said": reply[:200]})
             elif parsed.path == "/api/propose":
-                # the model proposes BOTH which arrangement the daughter
-                # walks and its invocation, in one call -- kindle.next's
-                # own options ARE the library's graph ids, so the menu is
-                # the library index and cannot drift out of step with it.
-                # Mirrors agent.py's propose_kindling exactly: same two
-                # things asked, same two-line reply format, same
-                # offerable-filtering so a lineage that chose json
-                # storage is never offered a graph whose root torch
-                # needs sqlite.
+                # kindle.next writes ONLY the invocation now -- what to
+                # build, not how. It used to also pick the graph in the
+                # same reply; split after watching a real lineage get the
+                # sentence right five times running while getting the
+                # graph wrong five times running, in the SAME response.
+                # Asking for a closed-menu choice and an open invention in
+                # one breath is exactly what docs/01's law/choice/invention
+                # split exists to prevent. /api/choosegraph (below) does
+                # the choosing now, informed by the sentence this writes,
+                # once it already exists rather than alongside it.
                 pid, tid = body["pid"], body["torch"]
                 brief = run_q(f"res: briefText[{qsym(pid)};{qsym(tid)}]")
                 st = run_q(f"res: state[{qsym(pid)}]")
+                rite = run_q(f"res: torches[{qsym(tid)}]`rite")
+                prompt = (
+                    f"{brief}\n\nTHE EMBER (what this lineage serves):\n  {st['ember']}\n\n"
+                    f"{rite}\n"
+                )
+                reply = ask_model(prompt, num_predict=400, torch=tid)
+                if not reply:
+                    self._send_json({"decline": True})
+                else:
+                    line = next((l.strip() for l in reply.splitlines() if l.strip()), "")
+                    invocation = line.strip('"').strip() if line and not line.upper().startswith("DECLINE") else None
+                    if not invocation or "<|" in invocation or len(invocation) < 10:
+                        self._send_json({"decline": True})
+                    else:
+                        self._send_json({"invocation": invocation})
+            elif parsed.path == "/api/choosegraph":
+                # the second half of kindling: which arrangement fits the
+                # invocation /api/propose already wrote. A plain decision
+                # -- the menu is choose.graph's own options, the library's
+                # graph ids -- just with that invocation prepended to the
+                # prompt, since it does not exist in the brief itself
+                # (rites are static; the sentence this answers was written
+                # by the PREVIOUS torch, one step after the brief for this
+                # call was already built from the chronicle).
+                pid, tid = body["pid"], body["torch"]
+                invocation = body["invocation"]
+                brief = run_q(f"res: briefText[{qsym(pid)};{qsym(tid)}]")
+                st = run_q(f"res: state[{qsym(pid)}]")
                 t = run_q(f"res: `rite`options!(torches[{qsym(tid)}]`rite; torches[{qsym(tid)}]`options)")
-                options = [o for o in t["options"] if o and o != "decline"]
+                options = list(t["options"])
                 offerable = set(st.get("offerable") or [])
                 if offerable:
                     kept = [o for o in options if o in offerable]
                     if kept:
                         options = kept
                 prompt = (
-                    f"{brief}\n\nTHE EMBER (what this lineage serves):\n  {st['ember']}\n\n"
+                    f"{brief}\n\nThe next generation will build this:\n\n  {invocation}\n\n"
                     f"{t['rite']}\n\n"
-                    "Reply with EXACTLY two lines and nothing else:\n"
-                    "GRAPH: <one of " + ", ".join(options) + ">\n"
-                    "NEXT: <one sentence naming the single thing to build>\n\n"
-                    "If nothing worthwhile remains, or the next step would not serve the ember,\n"
-                    "reply with exactly: DECLINE\n"
+                    "Reply with ONLY one of these exact option names, nothing else:\n"
+                    + ", ".join(options) + "\n\nOption:"
                 )
-                reply = ask_model(prompt, num_predict=900)
-                if not reply or ("DECLINE" in reply.upper() and "GRAPH:" not in reply.upper()):
-                    self._send_json({"decline": True})
-                else:
-                    chosen_graph, invocation = None, None
-                    for line in reply.splitlines():
-                        line = line.strip()
-                        up = line.upper()
-                        if up.startswith("GRAPH:"):
-                            said = line.split(":", 1)[1].strip().strip("`\"'")
-                            for opt in sorted(options, key=len, reverse=True):
-                                if opt in said:
-                                    chosen_graph = opt
-                                    break
-                        elif up.startswith("NEXT:"):
-                            invocation = line.split(":", 1)[1].strip().strip('"').strip()
-                    if invocation is None:
-                        for line in reply.splitlines():
-                            t2 = line.strip()
-                            if t2 and not t2.upper().startswith("GRAPH:") and len(t2) >= 10:
-                                invocation = t2.strip('"').strip()
-                                break
-                    if not invocation or "<|" in invocation or len(invocation) < 10:
-                        self._send_json({"decline": True})
-                    else:
-                        if chosen_graph is None:
-                            chosen_graph = "g.harden" if "g.harden" in options else options[0]
-                        self._send_json({"invocation": invocation, "graph": chosen_graph})
+                reply = ask_model(prompt, num_predict=200, torch=tid) or ""
+                pick = next((o for o in sorted(options, key=len, reverse=True) if o in reply), options[0])
+                self._send_json({"option": pick, "asked": True, "said": reply[:200]})
             elif parsed.path == "/api/authorize":
                 # The torch declares its target. A target ending in "/" means
                 # "a new module in this directory" -- each generation writes

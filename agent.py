@@ -24,7 +24,14 @@ import urllib.request
 BRIDGE = "http://127.0.0.1:8420"
 OLLAMA = "http://localhost:11434"
 MODEL = "torch-gpt-oss"
-MAX_STEPS_PER_PROPHECY = 30
+# g.resource's clean path -- 11 emit torches plus their checks plus the
+# now-two-step kindling (kindle.next, then choose.graph) -- runs right up
+# against 30 with zero repairs needed, found by a real isolated run that
+# hit the ceiling despite every single check passing. 45 gives a clean
+# g.resource walk real headroom for the repair loops it's actually built
+# to tolerate, without raising this so far that a genuinely stuck
+# prophecy burns a lot more real model time before the ceiling catches it.
+MAX_STEPS_PER_PROPHECY = 45
 EVOLVE = False
 GRAPH_EDGES = []
 
@@ -96,18 +103,24 @@ def fake_reply(prompt: str, torch: str | None = None) -> str:
     the run silently fell back to the default. The same mistake the bridge's
     canned answers already had to be fixed for.
     """
-    if "GRAPH:" in prompt:
+    # kindle.next and choose.graph are two separate calls now, not one --
+    # the first writes the sentence and advances FAKE_KINDLES, the second
+    # reads the SAME position back to answer consistently with it.
+    if torch == "kindle.next":
         i = len(FAKE_KINDLES)
         FAKE_KINDLES.append(1)
         if i >= len(FAKE_KINDLE_ORDER):
             return "DECLINE"
-        want = FAKE_KINDLE_ORDER[i]
-        # only offer a graph this prophecy could actually walk, so the
-        # canned run exercises the capability gate rather than fighting it
-        if want not in prompt:
-            return "DECLINE"
-        return ("GRAPH: %s\nNEXT: Add a way to record and report stored items."
-                % want)
+        return "Add a way to record and report stored items."
+    if torch == "choose.graph":
+        i = len(FAKE_KINDLES) - 1
+        if 0 <= i < len(FAKE_KINDLE_ORDER):
+            want = FAKE_KINDLE_ORDER[i]
+            # only offer a graph this prophecy could actually walk, so the
+            # canned run exercises the capability gate rather than fighting it
+            if want in prompt:
+                return want
+        return ""  # no usable match -- choose_graph() falls back to options[0]
     if torch and torch in FAKE_CHOICES:
         return FAKE_CHOICES[torch]
     return "done"
@@ -161,16 +174,46 @@ def choose_option(brief_text: str, torch: dict) -> str:
     return options[0]
 
 
-def propose_kindling(brief_text: str, torch: dict, ember: str, offerable=None):
-    """Ask the model for the daughter's graph and invocation.
+def propose_kindling(brief_text: str, torch: dict, ember: str) -> str | None:
+    """Ask the model for the daughter's invocation -- what to build, not
+    how. Returns None to decline.
 
-    Two things, both narrow: pick one arrangement from a closed menu, and
-    write one sentence. The menu is the kindling torch's own options, which
-    are the graph ids, so it cannot drift out of step with the library.
-
-    Returns (graph, invocation). graph is None to decline.
+    Used to also ask for a graph in the same reply (a GRAPH:/NEXT: format).
+    Split apart after watching a real lineage get the sentence right five
+    times running while getting the graph wrong five times running, in the
+    same response: asking for a closed-menu CHOICE and an open INVENTION
+    in one breath is exactly the thing docs/01's law/choice/invention split
+    exists to prevent, and this was the one torch in the library doing it.
+    choose_graph (below) now does the choosing, informed by the sentence
+    this returns, once it already exists rather than alongside it.
     """
-    options = [o for o in torch["options"] if o and o != "decline"]
+    prompt = (
+        f"{brief_text}\n\n"
+        f"THE EMBER (what this whole lineage ultimately serves):\n  {ember}\n\n"
+        f"{torch['rite']}\n"
+    )
+    reply = ask_model(prompt, num_predict=400, torch=torch["id"])
+    if reply is None:
+        return None  # unusable output is a decline, not a guess
+    line = next((l.strip() for l in reply.splitlines() if l.strip()), "")
+    if not line or line.upper().startswith("DECLINE"):
+        return None
+    invocation = line.strip('"').strip()
+    if not invocation or "<|" in invocation or len(invocation) < 10:
+        return None
+    return invocation
+
+
+def choose_graph(brief_text: str, torch: dict, invocation: str, offerable=None) -> str:
+    """Which arrangement fits the invocation propose_kindling already wrote.
+
+    A plain decision: the menu IS the torch's own options, which are the
+    library's graph ids, so it cannot drift out of step with the library.
+    Classifying a sentence that already exists against a fixed menu is a
+    grounded task -- unlike inventing the sentence and picking the label
+    in the same breath, which is what this replaced.
+    """
+    options = list(torch["options"])
     # docs/02 invariant 4: capability gating is applied at OFFER time. A
     # lineage that chose json storage cannot walk g.schema, whose root torch
     # requires sqlite -- so offering it produces a daughter that is dead on
@@ -182,50 +225,21 @@ def propose_kindling(brief_text: str, torch: dict, ember: str, offerable=None):
             options = keep
     prompt = (
         f"{brief_text}\n\n"
-        f"THE EMBER (what this whole lineage ultimately serves):\n  {ember}\n\n"
+        f"The next generation will build this:\n\n  {invocation}\n\n"
         f"{torch['rite']}\n\n"
-        "Reply with EXACTLY two lines and nothing else:\n"
-        "GRAPH: <one of " + ", ".join(options) + ">\n"
-        "NEXT: <one sentence naming the single thing to build>\n\n"
-        "If nothing worthwhile remains, or the next step would not serve the ember,\n"
-        "reply with exactly: DECLINE\n"
+        "Reply with ONLY one of these exact option names, nothing else:\n"
+        + ", ".join(options) + "\n\nOption:"
     )
-    reply = ask_model(prompt, num_predict=900)
+    reply = ask_model(prompt, num_predict=200, torch=torch["id"])
     if reply is None:
-        return None, None  # unusable output is a decline, not a guess
-    if "DECLINE" in reply.upper() and "GRAPH:" not in reply.upper():
-        return None, None
-
-    graph, invocation = None, None
-    for line in reply.splitlines():
-        line = line.strip()
-        up = line.upper()
-        if up.startswith("GRAPH:"):
-            said = line.split(":", 1)[1].strip().strip('`"\'')
-            # longest first, so g.fullstack is not matched as g.full
-            for opt in sorted(options, key=len, reverse=True):
-                if opt in said:
-                    graph = opt
-                    break
-        elif up.startswith("NEXT:"):
-            invocation = line.split(":", 1)[1].strip().strip('"').strip()
-
-    if invocation is None:
-        # tolerate a bare sentence where NEXT: was asked for, but never
-        # tolerate harmony markup or a truncated fragment
-        for line in reply.splitlines():
-            t = line.strip()
-            if t and not t.upper().startswith("GRAPH:") and len(t) >= 10:
-                invocation = t.strip('"').strip()
-                break
-    if not invocation or "<|" in invocation or len(invocation) < 10:
-        return None, None
-    if graph is None:
-        # a valid sentence with an unreadable graph choice is not a decline:
-        # hardening is the safe arrangement, because it adds no behaviour.
-        graph = "g.harden" if "g.harden" in options else options[0]
-        print(f"      (no readable graph choice -- defaulting to {graph})")
-    return graph, invocation
+        print(f"      (no usable reply -- defaulting to {options[0]!r})")
+        return options[0]
+    # longest first, so g.fullstack is not matched as a substring of g.full
+    for opt in sorted(options, key=len, reverse=True):
+        if opt in reply:
+            return opt
+    print(f"      (model said {reply!r}, matched no option -- defaulting to {options[0]!r})")
+    return options[0]
 
 
 def propose_mutations(brief_text: str, graph_edges: list, torch_ids: list, n: int = 3) -> list:
@@ -385,15 +399,19 @@ def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str | N
                             print(f"        variant {row['variant']} ({row['op']}): {row['score']}  {row['detail']}{mark}")
                 else:
                     print("      no usable mutations proposed")
-            next_graph, next_invocation = propose_kindling(
-                brief, torch, ember, state.get("offerable"))
-            # the chosen graph IS the option: the torch's options are the
-            # library's graph ids, so resolving one resolves the other.
-            option = next_graph if next_graph else "decline"
+            next_invocation = propose_kindling(brief, torch, ember)
+            option = "written" if next_invocation else "decline"
             if next_invocation:
-                print(f"      proposes {next_graph}: {next_invocation}")
+                print(f"      proposes building: {next_invocation}")
             else:
                 print("      declines to kindle")
+        elif torch_id == "choose.graph":
+            # reached only after kindle.next wrote `written`, so
+            # next_invocation is always set here -- the decline edge goes
+            # straight to the terminal and never reaches this torch.
+            next_graph = choose_graph(brief, torch, next_invocation, state.get("offerable"))
+            option = next_graph
+            print(f"      fits: {next_graph}")
         else:
             option = choose_option(brief, torch)
             if torch["kind"] != "validation":
