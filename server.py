@@ -599,10 +599,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # same minute.
                 slug = re.sub(r"[^a-z0-9]+", "-", invocation.lower()).strip("-")[:40] or "run"
                 stamp = time.strftime("%Y-%m-%d-%H%M")
+                rundir = f"{stamp}-{slug}-{hid[1:5]}"
                 # "app", not the prophecy id: daughters extend the parent's
                 # directory by default, so there is exactly one of these per
                 # hearth and a hex name on it was pure noise.
-                dest = os.path.join(RUNS_DIR, f"{stamp}-{slug}-{hid[1:5]}", "app")
+                dest = os.path.join(RUNS_DIR, rundir, "app")
                 os.makedirs(RUNS_DIR, exist_ok=True)
                 # 0 means unlimited on both, matching ignite[]'s own defaults
                 # -- only overridden when the caller actually sent a value.
@@ -610,7 +611,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 maxproph = int(body.get("maxproph") or 0)
                 label = body.get("label", "")
                 expr = (
-                    f"ignite[{qsym(hid)};{qstr(invocation)};{'1b' if evolution else '0b'}];"
+                    # rundir, not hid, as ignite[]'s halt-path hint -- a
+                    # HALT sentinel still has to sit outside dest/app/ (so
+                    # wiping the codebase can never un-halt a hearth), but
+                    # there is no reason for it to be its own bare-hex
+                    # top-level folder when the readable one already exists.
+                    f"ignite[{qsym(hid)};{qstr(invocation)};{'1b' if evolution else '0b'};{qstr(rundir)}];"
                     f"{'setcaps[' + qsym(hid) + ';' + str(diskcap) + 'j;' + str(maxproph) + 'j];' if (diskcap or maxproph) else ''}"
                     f"{'setlabel[' + qsym(hid) + ';' + qstr(label) + '];' if label else ''}"
                     f"begin[{qsym(hid)};{qsym(pid)};{qsym(graph)};{qstr(invocation)};{qstr(dest)}];"

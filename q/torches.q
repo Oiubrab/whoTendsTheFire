@@ -453,15 +453,23 @@ fork: {[hid]
 / found only by actually exercising halthearth[] against a test bridge.
 RUNSDIR: {[] d: getenv `RUNS_OVERRIDE; $[0 = count d; "runs"; d]}[]
 
-ignite: {[hid;emberText;evo]
+/ runhint is the same "{date}-{slug}-{hid prefix}" folder name begin[]
+/ is about to create dest inside of -- passed in rather than reconstructed
+/ here so there is exactly one place that invents it. Falls back to the
+/ bare hearth id only if the caller has none to give (there is currently
+/ only one caller, and it always does), which is also what every hearth
+/ ignited before this fix already has on disk, so old halt paths keep
+/ resolving.
+ignite: {[hid;emberText;evo;runhint]
   lb: $[evo; hid; `main];
+  dir: $[0=count runhint; string hid; runhint];
   `hearths upsert ([id: enlist hid]
     ember: enlist emberText;
     evolution: enlist evo;
     lib: enlist lb;
     diskcap: enlist 2000000000;
     maxproph: enlist 0;
-    halt: enlist RUNSDIR,"/",string[hid],"/HALT";
+    halt: enlist RUNSDIR,"/",dir,"/HALT";
     born: enlist .z.p);
   if[evo; fork[hid]]; }
 
