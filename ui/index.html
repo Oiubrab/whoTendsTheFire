@@ -35,33 +35,64 @@
     display: flex;
     flex-direction: column;
   }
-  header {
-    padding: 14px 20px;
+  #topnav {
+    padding: 10px 20px;
     border-bottom: 1px solid var(--panel-border);
     display: flex;
-    gap: 12px;
+    gap: 6px;
     align-items: center;
-    flex-wrap: wrap;
+    flex-shrink: 0;
   }
-  header h1 {
-    font-size: 18px;
-    margin: 0;
+  #topnav .brand {
+    font-size: 16px;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--frontier-glow);
     white-space: nowrap;
+    cursor: pointer;
+    margin-right: 14px;
+    background: none; border: none; padding: 0;
   }
-  header input[type=text] {
-    flex: 1;
-    min-width: 240px;
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    color: var(--ink);
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 14px;
+  .navlink {
+    background: transparent; border: none; color: var(--ink-dim);
+    font-weight: 500; font-size: 13px; padding: 7px 13px; border-radius: 6px;
+    cursor: pointer;
   }
-  header input[type=text]:focus { outline: 1px solid var(--frontier); }
+  .navlink:hover { color: var(--ink); background: var(--panel); }
+  .navlink.active { color: var(--frontier-glow); background: var(--panel); }
+  .navcurrent {
+    margin-left: auto; color: var(--ink-dim); font-size: 12.5px;
+    font-style: italic; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 360px;
+  }
+  .screen { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .screen[hidden] { display: none; }
+  #screen-home, #screen-hearths { overflow-y: auto; padding: 48px 24px; }
+  .home-hero { max-width: 640px; margin: 0 auto 48px; text-align: center; }
+  .home-hero h1 {
+    font-size: 30px; margin: 0 0 8px; color: var(--frontier-glow); font-weight: 600;
+  }
+  .home-hero .tagline { color: var(--ink-dim); margin: 0 0 26px; font-size: 14.5px; }
+  .home-form { display: flex; gap: 10px; }
+  .home-form input[type=text] {
+    flex: 1; background: var(--panel); border: 1px solid var(--panel-border);
+    color: var(--ink); padding: 11px 14px; border-radius: 6px; font-size: 14.5px;
+  }
+  .home-form input[type=text]:focus { outline: 1px solid var(--frontier); }
+  .home-form button { padding: 11px 20px; }
+  .home-section { max-width: 920px; margin: 0 auto; width: 100%; }
+  .home-section h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink-dim); display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--panel-border); padding-bottom: 6px; margin: 0 0 4px;
+  }
+  #screen-hearths h1, #screen-home h1.pagetitle {
+    max-width: 920px; margin: 0 auto 18px; font-size: 20px; width: 100%;
+  }
+  .hearth-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px; margin-top: 12px;
+  }
   button {
     background: var(--frontier);
     color: #1a1410;
@@ -223,6 +254,10 @@
     border-radius: 6px;
     line-height: 1.8;
   }
+  #prophecy-toolbar {
+    padding: 8px 20px; border-bottom: 1px solid var(--panel-border);
+    display: flex; gap: 10px; align-items: center; flex-shrink: 0;
+  }
   #statusbar {
     padding: 7px 20px; border-bottom: 1px solid var(--panel-border);
     background: #17120e; font-size: 12.5px; color: var(--ink-dim);
@@ -264,21 +299,9 @@
   }
   #advanced-panel input#label-input { width: 160px; }
 
-  .drawer-backdrop {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 20; display: none;
-  }
-  .drawer-backdrop.open { display: block; }
-  #hearths-drawer {
-    position: fixed; top: 0; right: 0; bottom: 0; width: 460px; max-width: 92vw;
-    background: var(--panel); border-left: 1px solid var(--panel-border);
-    z-index: 21; padding: 16px; overflow-y: auto;
-    transform: translateX(100%); transition: transform 0.2s ease;
-  }
-  #hearths-drawer.open { transform: translateX(0); }
-  #hearths-drawer h2 { margin-top: 0; display: flex; justify-content: space-between; align-items: center; }
   .hearth-card {
     background: #0f0c09; border: 1px solid var(--panel-border); border-radius: 8px;
-    padding: 10px 12px; margin-bottom: 10px; cursor: pointer;
+    padding: 10px 12px; cursor: pointer;
   }
   .hearth-card:hover { border-color: var(--ink-dim); }
   .hearth-card.current { border-color: var(--frontier); }
@@ -328,75 +351,97 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>&#128293; whoTendsTheFire</h1>
-  <input id="invocation" type="text" placeholder="What do you want to build? e.g. build me a small python cli tool" />
-  <button id="begin-btn">Light the Hearth</button>
-  <button class="secondary" id="stop-btn" style="display:none">Stop</button>
-  <button class="secondary iconbtn" id="hearths-btn">Hearths</button>
-  <button class="secondary" id="new-hearth-btn">New Hearth</button>
-  <button class="secondary" id="reset-btn">Reset view</button>
-  <label class="autolbl"><input type="checkbox" id="auto-chk" checked> run itself</label>
-  <div id="advanced-panel">
-    <label>cap <input type="number" id="diskcap-input" placeholder="unlimited" min="0" step="1000000"></label>
-    <label>max gens <input type="number" id="maxproph-input" placeholder="unlimited" min="0" step="1"></label>
-    <label>label <input type="text" id="label-input" placeholder="optional name for this hearth"></label>
+<nav id="topnav">
+  <button class="brand" id="nav-brand">&#128293; whoTendsTheFire</button>
+  <button class="navlink" id="nav-home-btn">Home</button>
+  <button class="navlink" id="nav-hearths-btn">Hearths</button>
+  <span class="navcurrent" id="nav-current"></span>
+</nav>
+
+<section class="screen" id="screen-home">
+  <div class="home-hero">
+    <h1>&#128293; whoTendsTheFire</h1>
+    <p class="tagline">Law, choice, and invention. Say what to build, and a hearth tends itself.</p>
+    <div class="home-form">
+      <input id="invocation" type="text" placeholder="What do you want to build? e.g. build me a small python cli tool" />
+      <button id="begin-btn">Light the Hearth</button>
+    </div>
+    <div style="text-align:left"><span id="advanced-toggle">advanced options ▾</span></div>
+    <div id="advanced-panel">
+      <label>cap <input type="number" id="diskcap-input" placeholder="unlimited" min="0" step="1000000"></label>
+      <label>max gens <input type="number" id="maxproph-input" placeholder="unlimited" min="0" step="1"></label>
+      <label>label <input type="text" id="label-input" placeholder="optional name for this hearth"></label>
+    </div>
   </div>
-</header>
-<div style="padding:0 20px"><span id="advanced-toggle">advanced options ▾</span></div>
-<div class="drawer-backdrop" id="drawer-backdrop"></div>
-<div id="hearths-drawer">
-  <h2>Hearths <button class="secondary iconbtn" id="drawer-close">close</button></h2>
-  <div id="hearths-list" class="muted">loading…</div>
-</div>
-<div id="statusbar"><span id="spinner"></span><span id="status">idle</span></div>
-<main>
-  <div id="graph-wrap">
-    <div id="legend"></div>
-    <svg id="svg"></svg>
-    <div id="picker"></div>
-    <div id="toast"></div>
+  <div class="home-section">
+    <h2>Recent hearths <button class="secondary iconbtn" id="home-viewall" style="padding:3px 10px;font-size:11px">view all</button></h2>
+    <div id="home-recent-list" class="hearth-grid muted">loading…</div>
   </div>
-  <aside>
-    <h2>Ember</h2>
-    <div class="invocation-text muted" id="sb-ember">No hearth lit yet.</div>
+</section>
 
-    <h2>This prophecy</h2>
-    <div class="invocation-text muted" id="sb-invocation">—</div>
-    <div class="muted" id="sb-gen" style="margin-top:6px"></div>
+<section class="screen" id="screen-hearths" hidden>
+  <h1 class="pagetitle">Hearths</h1>
+  <div class="home-section">
+    <div id="hearths-list" class="hearth-grid muted">loading…</div>
+  </div>
+</section>
 
-    <h2>Capabilities</h2>
-    <div id="sb-caps" class="muted">(none yet)</div>
+<section class="screen" id="screen-prophecy" hidden>
+  <div id="prophecy-toolbar">
+    <button class="secondary" id="stop-btn" style="display:none">Stop</button>
+    <button class="secondary" id="reset-btn">Reset view</button>
+    <button class="secondary" id="leave-btn">Leave hearth</button>
+    <label class="autolbl"><input type="checkbox" id="auto-chk" checked> run itself</label>
+  </div>
+  <div id="statusbar"><span id="spinner"></span><span id="status">idle</span></div>
+  <main>
+    <div id="graph-wrap">
+      <div id="legend"></div>
+      <svg id="svg"></svg>
+      <div id="picker"></div>
+      <div id="toast"></div>
+    </div>
+    <aside>
+      <h2>Ember</h2>
+      <div class="invocation-text muted" id="sb-ember">No hearth lit yet.</div>
 
-    <h2>Arrangements</h2>
-    <div id="sb-arrangements" class="muted">(not at a kindling step)</div>
+      <h2>This prophecy</h2>
+      <div class="invocation-text muted" id="sb-invocation">—</div>
+      <div class="muted" id="sb-gen" style="margin-top:6px"></div>
 
-    <h2>Last check</h2>
-    <div id="sb-lastcheck" class="muted">(nothing checked yet)</div>
+      <h2>Capabilities</h2>
+      <div id="sb-caps" class="muted">(none yet)</div>
 
-    <h2>Torches lit so far</h2>
-    <div id="sb-trail" class="muted">(none yet)</div>
+      <h2>Arrangements</h2>
+      <div id="sb-arrangements" class="muted">(not at a kindling step)</div>
 
-    <h2>Codebase</h2>
-    <div id="sb-tree" class="muted">(empty)</div>
+      <h2>Last check</h2>
+      <div id="sb-lastcheck" class="muted">(nothing checked yet)</div>
 
-    <h2>Lineage</h2>
-    <div id="sb-lineage" class="muted">(none yet)</div>
+      <h2>Torches lit so far</h2>
+      <div id="sb-trail" class="muted">(none yet)</div>
 
-    <h2>Code produced</h2>
-    <div id="sb-code" class="muted">(nothing written yet)</div>
+      <h2>Codebase</h2>
+      <div id="sb-tree" class="muted">(empty)</div>
 
-    <h2>History <button class="secondary iconbtn" id="history-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
-    <div id="sb-history" class="muted">(no commits yet)</div>
-    <div id="sb-diff"></div>
+      <h2>Lineage</h2>
+      <div id="sb-lineage" class="muted">(none yet)</div>
 
-    <h2>Quarantined tests <button class="secondary iconbtn" id="quarantine-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
-    <div id="sb-quarantine" class="muted">(none)</div>
+      <h2>Code produced</h2>
+      <div id="sb-code" class="muted">(nothing written yet)</div>
 
-    <h2>What it printed when run</h2>
-    <pre id="sb-output" class="runout">(not run yet)</pre>
-  </aside>
-</main>
+      <h2>History <button class="secondary iconbtn" id="history-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
+      <div id="sb-history" class="muted">(no commits yet)</div>
+      <div id="sb-diff"></div>
+
+      <h2>Quarantined tests <button class="secondary iconbtn" id="quarantine-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
+      <div id="sb-quarantine" class="muted">(none)</div>
+
+      <h2>What it printed when run</h2>
+      <pre id="sb-output" class="runout">(not run yet)</pre>
+    </aside>
+  </main>
+</section>
 <script>
 const $ = sel => document.querySelector(sel);
 const $$ = sel => [...document.querySelectorAll(sel)];
@@ -1055,41 +1100,74 @@ function renderLastCheck() {
     (lc.output ? `<pre style="margin-top:4px;background:#0d0b08;border:1px solid var(--panel-border);border-radius:5px;padding:7px;font-family:ui-monospace,monospace;font-size:11px;max-height:200px;overflow:auto">${esc(lc.output)}</pre>` : "");
 }
 
-// ---- hearth archive ----
-
-function openDrawer() {
-  $("#hearths-drawer").classList.add("open");
-  $("#drawer-backdrop").classList.add("open");
-  fetchHearths();
+// ---- screens ----
+// three top-level views, exactly one visible at a time: Home (landing +
+// hearth creation), Hearths (the full archive), Prophecy (the graph +
+// sidebar -- the only screen that ever had any content before this).
+// Navigating is just swapping which <section> has [hidden]; nothing here
+// touches history/the URL, since nothing in this app needs a shareable
+// link to a specific screen.
+function showScreen(name) {
+  ["home", "hearths", "prophecy"].forEach(s => {
+    $(`#screen-${s}`).hidden = s !== name;
+  });
+  $$(".navlink").forEach(b => b.classList.remove("active"));
+  if (name === "home") $("#nav-home-btn").classList.add("active");
+  if (name === "hearths") $("#nav-hearths-btn").classList.add("active");
+  $("#nav-current").textContent = (name === "prophecy" && currentState) ? currentState.ember || "" : "";
+  if (name === "home") refreshHomeRecent();
+  if (name === "hearths") fetchHearths();
 }
-function closeDrawer() {
-  $("#hearths-drawer").classList.remove("open");
-  $("#drawer-backdrop").classList.remove("open");
+
+// ---- hearth archive (both the Home screen's teaser and the full Hearths screen render through this) ----
+
+function renderHearthList(containerId, rows, limit) {
+  const shown = limit ? rows.slice(0, limit) : rows;
+  $(containerId).innerHTML = shown.length
+    ? shown.map(h => renderHearthCard(h)).join("")
+    : '<span class="muted">no hearths lit yet -- light one above</span>';
+  $$(`${containerId} .hearth-card`).forEach(card => {
+    card.onclick = (ev) => {
+      if (ev.target.closest("button")) return;
+      openHearth(card.dataset.id);
+    };
+  });
+  $$(`${containerId} .hc-halt`).forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    await api("POST", "/api/halt", { hearth: b.dataset.id });
+    fetchHearths(); refreshHomeRecent();
+  });
+  $$(`${containerId} .hc-resume`).forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    await api("POST", "/api/resume", { hearth: b.dataset.id });
+    fetchHearths(); refreshHomeRecent();
+  });
+  $$(`${containerId} .hc-label`).forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const txt = prompt("Label for this hearth:", b.dataset.current || "");
+    if (txt === null) return;
+    await api("POST", "/api/label", { hearth: b.dataset.id, label: txt.trim() });
+    fetchHearths(); refreshHomeRecent();
+  });
 }
 
 async function fetchHearths() {
   try {
     const rows = await api("GET", "/api/hearths");
     rows.sort((a, b) => (b.born || "").localeCompare(a.born || ""));
-    $("#hearths-list").innerHTML = rows.length
-      ? rows.map(h => renderHearthCard(h)).join("")
-      : '<span class="muted">no hearths lit yet</span>';
-    $$(".hearth-card").forEach(card => {
-      card.onclick = (ev) => {
-        if (ev.target.closest("button")) return;
-        openHearth(card.dataset.id);
-      };
-    });
-    $$(".hc-halt").forEach(b => b.onclick = async () => { await api("POST", "/api/halt", { hearth: b.dataset.id }); fetchHearths(); });
-    $$(".hc-resume").forEach(b => b.onclick = async () => { await api("POST", "/api/resume", { hearth: b.dataset.id }); fetchHearths(); });
-    $$(".hc-label").forEach(b => b.onclick = async () => {
-      const txt = prompt("Label for this hearth:", b.dataset.current || "");
-      if (txt === null) return;
-      await api("POST", "/api/label", { hearth: b.dataset.id, label: txt.trim() });
-      fetchHearths();
-    });
+    renderHearthList("#hearths-list", rows);
   } catch (e) {
     $("#hearths-list").innerHTML = `<span class="muted">failed to load: ${esc(e.message)}</span>`;
+  }
+}
+
+async function refreshHomeRecent() {
+  try {
+    const rows = await api("GET", "/api/hearths");
+    rows.sort((a, b) => (b.born || "").localeCompare(a.born || ""));
+    renderHearthList("#home-recent-list", rows, 6);
+  } catch (e) {
+    $("#home-recent-list").innerHTML = `<span class="muted">failed to load: ${esc(e.message)}</span>`;
   }
 }
 
@@ -1123,7 +1201,7 @@ async function openHearth(hid) {
     if (!rows.length) { toast("that hearth has no prophecies"); return; }
     hearth = hid;
     await loadProphecy(rows[rows.length - 1].id);
-    closeDrawer();
+    showScreen("prophecy");
     toast(`opened ${hid}`, "ok");
   } catch (e) { toast(e.message); }
 }
@@ -1215,6 +1293,7 @@ async function reconnectSession() {
     await refreshLineage();
     await refreshCode();
     render();
+    showScreen("prophecy");
     const fr = (st.frontier || []).filter(Boolean);
     if (fr.length) {
       toast(`reconnected to generation ${st.generation} — resuming`, "ok");
@@ -1251,6 +1330,7 @@ $("#begin-btn").onclick = async () => {
     await refreshLineage();
     await refreshCode();
     render();
+    showScreen("prophecy");
     if ($("#auto-chk").checked) autoRun();
   } catch (e) {
     toast(e.message);
@@ -1262,7 +1342,7 @@ $("#stop-btn").onclick = () => { stopRequested = true; status("stopping after th
 // purely the camera now -- it used to also drop the active session,
 // which is exactly the "why is the old hearth still there after I
 // clicked what I thought was a reset" confusion this split exists to
-// fix. Clearing the session is New Hearth's job alone.
+// fix. Clearing the session is Leave hearth's job alone.
 $("#reset-btn").onclick = () => resetView();
 
 function clearToIdle() {
@@ -1289,17 +1369,23 @@ function clearToIdle() {
   render();
 }
 
-$("#new-hearth-btn").onclick = () => {
-  const mid_run = running || (currentState && (currentState.frontier || []).filter(Boolean).length > 0);
-  if (pid && mid_run && !confirm("This hearth is still active. It will keep existing and can be reopened from Hearths -- this just clears the view. Continue?")) return;
+// leaves the CURRENT VIEW, not the hearth -- it keeps existing exactly as
+// it was (active and auto-running, or halted) and reopens from Hearths or
+// Home's recent list right where it was. Only confirms if walking away
+// would also silently stop an in-progress autoRun loop.
+$("#leave-btn").onclick = () => {
+  const midRun = running;
+  if (midRun && !confirm("This hearth is still auto-running. Leaving will stop driving it here, but it stays exactly as-is and can be reopened. Continue?")) return;
   stopRequested = true;
   clearToIdle();
   $("#invocation").value = "";
+  showScreen("home");
 };
 
-$("#hearths-btn").onclick = openDrawer;
-$("#drawer-close").onclick = closeDrawer;
-$("#drawer-backdrop").onclick = closeDrawer;
+$("#nav-brand").onclick = () => showScreen("home");
+$("#nav-home-btn").onclick = () => showScreen("home");
+$("#nav-hearths-btn").onclick = () => showScreen("hearths");
+$("#home-viewall").onclick = () => showScreen("hearths");
 $("#history-refresh").onclick = refreshHistory;
 $("#quarantine-refresh").onclick = refreshQuarantine;
 
@@ -1308,6 +1394,7 @@ $("#advanced-toggle").onclick = () => {
   $("#advanced-toggle").textContent = open ? "advanced options ▴" : "advanced options ▾";
 };
 
+showScreen("home");
 loadGraph().then(reconnectSession).catch(e => toast(e.message));
 </script>
 </body>
