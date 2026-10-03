@@ -1,0 +1,93 @@
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650;12..96,750&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
+@import "tailwindcss";
+
+/* Design tokens -- see the plan artifact for the rationale. "Ember on
+   soot": ember orange means live/active/needs-your-hand and nothing
+   else; pass/fail/halted get their own semantic colors so status reads
+   without reading the orange. */
+@theme {
+  --color-soot: #110d0a;
+  --color-char: #18130f;
+  --color-coal: #211a14;
+  --color-line: #2e251d;
+  --color-line2: #3e3226;
+  --color-bone: #eee4d2;
+  --color-ash: #a39580;
+  --color-dim: #74685a;
+
+  --color-ember: #f28c3a;
+  --color-ember2: #ffb563;
+  --color-emberbg: #2c1c0f;
+
+  --color-pass: #86cb8e;
+  --color-passbg: #16261a;
+  --color-fail: #e8695b;
+  --color-failbg: #2e1714;
+  --color-warn: #ddaa45;
+  --color-warnbg: #2b2210;
+
+  --color-k-decision: #5aa9e6;
+  --color-k-action: #6fbf73;
+  --color-k-validation: #c77dd1;
+  --color-k-kindling: #e8c44a;
+  --color-k-authoring: #7fd4c1;
+
+  /* graph-view-only tones: a lit torch and the ember accent share a hue
+     family but are kept as distinct tokens since "lit" needs to read
+     clearly against five torch-kind ring colors at once */
+  --color-unlit: #4a4136;
+  --color-neighbor: #6b5d47;
+  --color-gedge: #3a2f26;
+  --color-gedge-hot: #b5652c;
+  --color-lit: #ff6b35;
+  --color-lit-glow: #ff9d5c;
+  --color-gfrontier: #d98a2b;
+  --color-gfrontier-glow: #ffb454;
+
+  --font-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-soot);
+  color: var(--color-bone);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--color-emberbg);
+  color: var(--color-ember2);
+}
+
+/* thin, dark scrollbars everywhere -- the default light ones look broken
+   against this palette */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line2);
+  border-radius: 5px;
+}
+
+@keyframes torch-working {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 6px var(--color-gfrontier-glow));
+  }
+  50% {
+    filter: drop-shadow(0 0 22px var(--color-lit-glow));
+  }
+}

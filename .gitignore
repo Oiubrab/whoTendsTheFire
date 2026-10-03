@@ -11,3 +11,5 @@ __pycache__/
 .torch-output
 resource.spec
 .resource-spec.txt
+ui/node_modules/
+ui/dist/

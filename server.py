@@ -30,7 +30,19 @@ Q_SCRIPT = os.path.join(REPO, "q", "torches.q")
 DB_DIR = os.environ.get("DB_OVERRIDE") or os.path.join(REPO, "db")
 os.makedirs(DB_DIR, exist_ok=True)
 RUNS_DIR = os.environ.get("RUNS_OVERRIDE") or os.path.join(REPO, "runs")
-UI_DIR = os.path.join(REPO, "ui")
+# the React/Vite build's output, not the source -- `npm run build` in
+# ui/ writes here. The bridge never runs a dev server; it only ever
+# serves whatever was last built.
+UI_DIR = os.path.join(REPO, "ui", "dist")
+
+STATIC_TYPES = {
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".json": "application/json; charset=utf-8",
+    ".woff2": "font/woff2",
+}
 
 
 def qstr(s: str) -> str:
@@ -471,7 +483,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         try:
-            if parsed.path in ("/", "/index.html"):
+            if parsed.path.startswith("/assets/") or parsed.path in ("/favicon.svg",):
+                # the hashed JS/CSS bundle plus whatever's in ui/public/ --
+                # anything NOT under /api/ that maps to a real file on disk.
+                rel = parsed.path.lstrip("/")
+                fp = os.path.join(UI_DIR, rel)
+                ext = os.path.splitext(fp)[1]
+                if os.path.isfile(fp) and ".." not in rel:
+                    self._send_file(fp, STATIC_TYPES.get(ext, "application/octet-stream"))
+                else:
+                    self._send_json({"error": "not found"}, 404)
+            elif not parsed.path.startswith("/api/"):
+                # every client-side route (/, /hearths/h123/graph, ...) is
+                # the same SPA shell -- react-router resolves the path
+                # itself once index.html's JS loads, so there is nothing
+                # here to distinguish between them.
                 self._send_file(os.path.join(UI_DIR, "index.html"), "text/html; charset=utf-8")
             elif parsed.path == "/api/graph":
                 result = run_q(
@@ -487,6 +513,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # the archive/dashboard view: every hearth that has ever
                 # existed, not just the one session.json remembers.
                 self._send_json(run_q("res: 0!hearthlist[]"))
+            elif parsed.path == "/api/health":
+                ollama_ok = False
+                try:
+                    with urllib.request.urlopen(f"{OLLAMA}/api/tags", timeout=2) as r:
+                        json.loads(r.read())
+                        ollama_ok = True
+                except Exception:
+                    pass
+                self._send_json({
+                    "bridge": True,
+                    "port": self.server.server_address[1],
+                    "ollama": ollama_ok,
+                    "model": MODEL,
+                    "diskused": sum(
+                        os.path.getsize(os.path.join(dp, f))
+                        for dp, _, files in os.walk(RUNS_DIR)
+                        for f in files
+                        if os.path.exists(os.path.join(dp, f))
+                    ) if os.path.isdir(RUNS_DIR) else 0,
+                })
             elif parsed.path == "/api/blocked":
                 qs = urllib.parse.parse_qs(parsed.query)
                 pid = qs["pid"][0]
