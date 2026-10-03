@@ -7,3 +7,6 @@ runs/
 .kx/*
 __pycache__/
 db.*/
+.torch-output
+resource.spec
+.resource-spec.txt

@@ -654,14 +654,24 @@ hearthdisk: {[hid]
   ds: exec distinct dest from prophecies where hearth=hid;
   $[0 = count ds; 0j; sum dirsize each ds] }
 
+/ every h`field below is bracket notation, h[`field], never backtick
+/ sugar -- this torch sat unexercised long enough that nobody noticed
+/ h`halt," exists" parses as h[`halt," exists"], the SAME right-to-left
+/ trap fixed once before for `=`, except here the absorbing operator is
+/ `,`. Confirmed empirically: h`halt," exists" throws 'type;
+/ h[`halt]," exists" does not. The sugar form is unsafe the moment
+/ anything at all follows it, not just a comparison.
 maykindle: {[hid]
   h: hearths[hid];
   n: count select from prophecies where hearth=hid;
   used: hearthdisk[hid];
-  $[count key hsym `$h`halt;          (0b; "halted: ",h`halt," exists");
-    (h[`maxproph] > 0) and n >= h`maxproph; (0b; "prophecy ceiling reached (",string[h`maxproph],")");
-    (h[`diskcap] > 0) and used >= h`diskcap;
-      (0b; "disk cap reached (",string[used]," of ",string[h`diskcap]," bytes)");
+  halt: h[`halt];
+  maxp: h[`maxproph];
+  cap: h[`diskcap];
+  $[count key hsym `$halt;      (0b; "halted: ",halt," exists");
+    (maxp > 0) and n >= maxp;   (0b; "prophecy ceiling reached (",string[maxp],")");
+    (cap > 0) and used >= cap;
+      (0b; "disk cap reached (",string[used]," of ",string[cap]," bytes)");
     (1b; "ok")] }
 
 / dest is the caller's choice on purpose: pass the parent's dest to
