@@ -244,6 +244,87 @@
     50%     { filter: drop-shadow(0 0 22px var(--lit-glow)); }
   }
   #legend span.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+
+  .iconbtn {
+    background: transparent; border: 1px solid var(--panel-border); color: var(--ink-dim);
+    font-weight: 400; padding: 8px 12px;
+  }
+  .iconbtn:hover { color: var(--ink); border-color: var(--ink-dim); background: transparent; }
+  #advanced-toggle { cursor: pointer; font-size: 12px; color: var(--ink-dim); user-select: none; }
+  #advanced-toggle:hover { color: var(--ink); }
+  #advanced-panel {
+    display: none; gap: 8px; align-items: center; width: 100%;
+    padding: 8px 0 0; border-top: 1px dashed var(--panel-border); margin-top: 8px;
+  }
+  #advanced-panel.open { display: flex; }
+  #advanced-panel label { font-size: 12px; color: var(--ink-dim); display: flex; align-items: center; gap: 5px; }
+  #advanced-panel input[type=text], #advanced-panel input[type=number] {
+    background: var(--panel); border: 1px solid var(--panel-border); color: var(--ink);
+    padding: 5px 8px; border-radius: 5px; font-size: 12px; width: 90px;
+  }
+  #advanced-panel input#label-input { width: 160px; }
+
+  .drawer-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 20; display: none;
+  }
+  .drawer-backdrop.open { display: block; }
+  #hearths-drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 460px; max-width: 92vw;
+    background: var(--panel); border-left: 1px solid var(--panel-border);
+    z-index: 21; padding: 16px; overflow-y: auto;
+    transform: translateX(100%); transition: transform 0.2s ease;
+  }
+  #hearths-drawer.open { transform: translateX(0); }
+  #hearths-drawer h2 { margin-top: 0; display: flex; justify-content: space-between; align-items: center; }
+  .hearth-card {
+    background: #0f0c09; border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 10px; cursor: pointer;
+  }
+  .hearth-card:hover { border-color: var(--ink-dim); }
+  .hearth-card.current { border-color: var(--frontier); }
+  .hearth-card .hc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .hearth-card .hc-label { font-weight: 600; color: var(--ink); }
+  .hearth-card .hc-ember { font-size: 12.5px; color: var(--ink-dim); font-style: italic; margin: 4px 0 6px; }
+  .hearth-card .hc-meta { font-size: 11px; color: var(--ink-dim); display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 8px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .badge.halted { background: #3a1f1a; color: #e8897a; }
+  .badge.running { background: #1a2e1a; color: #8fd98a; }
+  .hearth-card .hc-actions { margin-top: 8px; display: flex; gap: 6px; }
+  .hearth-card .hc-actions button { padding: 4px 9px; font-size: 11px; }
+
+  details.dirgroup { margin-bottom: 4px; }
+  details.dirgroup > summary {
+    cursor: pointer; font-family: ui-monospace, monospace; font-size: 11.5px;
+    color: var(--authoring); padding: 3px 0;
+  }
+  .file-row {
+    font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--ink-dim);
+    cursor: pointer; padding: 2px 0 2px 14px;
+  }
+  .file-row:hover { color: var(--ink); }
+  .file-row.open { color: var(--frontier-glow); }
+
+  .commit-row {
+    font-family: ui-monospace, monospace; font-size: 11.5px; cursor: pointer;
+    padding: 4px 0; border-bottom: 1px dashed var(--panel-border); color: var(--ink-dim);
+  }
+  .commit-row:hover { color: var(--ink); }
+  .commit-row .ch { color: var(--frontier-glow); margin-right: 6px; }
+  .diffpre { color: #d8c98a; }
+  .diffpre .add { color: #9fd98a; }
+  .diffpre .del { color: #e8897a; }
+  .lineage-row {
+    cursor: pointer; border-radius: 5px; padding: 5px 6px !important;
+  }
+  .lineage-row:hover { background: #0f0c09; }
+  .lineage-row.current { outline: 1px solid var(--frontier); }
+  .blocked-row { font-size: 12px; padding: 3px 0; color: var(--ink-dim); }
+  .blocked-row .g { color: var(--ink); }
+  .blocked-row .why { color: var(--err); }
+  .offerable-row { font-size: 12px; padding: 3px 0; color: #9fd98a; }
 </style>
 </head>
 <body>
@@ -252,9 +333,22 @@
   <input id="invocation" type="text" placeholder="What do you want to build? e.g. build me a small python cli tool" />
   <button id="begin-btn">Light the Hearth</button>
   <button class="secondary" id="stop-btn" style="display:none">Stop</button>
+  <button class="secondary iconbtn" id="hearths-btn">Hearths</button>
+  <button class="secondary" id="new-hearth-btn">New Hearth</button>
   <button class="secondary" id="reset-btn">Reset view</button>
   <label class="autolbl"><input type="checkbox" id="auto-chk" checked> run itself</label>
+  <div id="advanced-panel">
+    <label>cap <input type="number" id="diskcap-input" placeholder="unlimited" min="0" step="1000000"></label>
+    <label>max gens <input type="number" id="maxproph-input" placeholder="unlimited" min="0" step="1"></label>
+    <label>label <input type="text" id="label-input" placeholder="optional name for this hearth"></label>
+  </div>
 </header>
+<div style="padding:0 20px"><span id="advanced-toggle">advanced options ▾</span></div>
+<div class="drawer-backdrop" id="drawer-backdrop"></div>
+<div id="hearths-drawer">
+  <h2>Hearths <button class="secondary iconbtn" id="drawer-close">close</button></h2>
+  <div id="hearths-list" class="muted">loading…</div>
+</div>
 <div id="statusbar"><span id="spinner"></span><span id="status">idle</span></div>
 <main>
   <div id="graph-wrap">
@@ -274,6 +368,12 @@
     <h2>Capabilities</h2>
     <div id="sb-caps" class="muted">(none yet)</div>
 
+    <h2>Arrangements</h2>
+    <div id="sb-arrangements" class="muted">(not at a kindling step)</div>
+
+    <h2>Last check</h2>
+    <div id="sb-lastcheck" class="muted">(nothing checked yet)</div>
+
     <h2>Torches lit so far</h2>
     <div id="sb-trail" class="muted">(none yet)</div>
 
@@ -286,12 +386,20 @@
     <h2>Code produced</h2>
     <div id="sb-code" class="muted">(nothing written yet)</div>
 
+    <h2>History <button class="secondary iconbtn" id="history-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
+    <div id="sb-history" class="muted">(no commits yet)</div>
+    <div id="sb-diff"></div>
+
+    <h2>Quarantined tests <button class="secondary iconbtn" id="quarantine-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
+    <div id="sb-quarantine" class="muted">(none)</div>
+
     <h2>What it printed when run</h2>
     <pre id="sb-output" class="runout">(not run yet)</pre>
   </aside>
 </main>
 <script>
 const $ = sel => document.querySelector(sel);
+const $$ = sel => [...document.querySelectorAll(sel)];
 const svg = $("#svg");
 const NS = "http://www.w3.org/2000/svg";
 
@@ -394,6 +502,10 @@ function toast(msg, kind) {
   t.style.display = "block";
   clearTimeout(toast._h);
   toast._h = setTimeout(() => t.style.display = "none", 4000);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 }
 
 async function api(method, path, body) {
@@ -629,8 +741,16 @@ async function kindleFrom(node) {
   // happened to resolve first.
   const offerable = (currentState && currentState.offerable || []).filter(g => g !== "g.found");
   const menu = offerable.length ? offerable : (graph.nodes.length ? [node.graph] : []);
+  let blockedNote = "";
+  try {
+    const blocked = await api("GET", `/api/blocked?pid=${pid}`);
+    const offSet = new Set(offerable);
+    const lines = blocked.filter(r => !offSet.has(r.graph) && (r.missing || []).length)
+      .map(r => `  ${r.graph} needs ${r.missing.join(", ")}`);
+    if (lines.length) blockedNote = `\n\nNot available:\n${lines.join("\n")}`;
+  } catch (e) { /* the menu still works without this */ }
   const graphChoice = prompt(
-    `Which arrangement fits:\n${invocation}\n\nOptions: ${menu.join(", ")}`,
+    `Which arrangement fits:\n${invocation}\n\nOptions: ${menu.join(", ")}${blockedNote}`,
     menu[0] || node.graph);
   if (graphChoice === null) return;
   const chosenGraph = menu.includes(graphChoice.trim()) ? graphChoice.trim() : menu[0];
@@ -763,15 +883,71 @@ async function authorAt(node) {
   await refreshCode();
 }
 
+let lastFiles = {};
+
+// a directory tree with the content already in hand (/api/file returns
+// every file's full text in one call) -- grouping and lazy-expanding is
+// purely a DOM-weight concern, not a network one. Rebuilt from scratch
+// each call, but which <details> were open and which file was showing
+// survive, so clicking into a file doesn't get wiped by the very next
+// light().
+function renderFileTree(files) {
+  const openDirs = new Set([...document.querySelectorAll("details.dirgroup[open]")].map(d => d.dataset.dir));
+  const openFile = document.querySelector(".file-row.open");
+  const openFileName = openFile ? openFile.dataset.name : null;
+
+  const names = Object.keys(files).sort();
+  if (!names.length) { $("#sb-code").innerHTML = '<span class="muted">(nothing written yet)</span>'; return; }
+  const byDir = {};
+  names.forEach(n => {
+    const i = n.lastIndexOf("/");
+    const dir = i === -1 ? "." : n.slice(0, i);
+    (byDir[dir] = byDir[dir] || []).push(n);
+  });
+  const dirs = Object.keys(byDir).sort();
+  $("#sb-code").innerHTML = dirs.map(dir => `
+    <details class="dirgroup" data-dir="${esc(dir)}" ${openDirs.has(dir) || dirs.length === 1 ? "open" : ""}>
+      <summary>${esc(dir)}/</summary>
+      ${byDir[dir].map(n => {
+        const base = n.slice(n.lastIndexOf("/") + 1);
+        return `<div class="file-row" data-name="${esc(n)}">${esc(base)}</div>`;
+      }).join("")}
+    </details>
+  `).join("");
+  $$("#sb-code .file-row").forEach(row => {
+    row.onclick = () => toggleFile(row);
+  });
+  if (openFileName && files[openFileName] !== undefined) {
+    const row = $(`#sb-code .file-row[data-name="${CSS.escape(openFileName)}"]`);
+    if (row) toggleFile(row, true);
+  }
+}
+
+function toggleFile(row, forceOpen) {
+  const existing = row.nextElementSibling;
+  if (existing && existing.classList.contains("codefile")) {
+    if (forceOpen) return;
+    existing.remove();
+    row.classList.remove("open");
+    return;
+  }
+  document.querySelectorAll(".file-row.open").forEach(r => {
+    r.classList.remove("open");
+    if (r.nextElementSibling && r.nextElementSibling.classList.contains("codefile")) r.nextElementSibling.remove();
+  });
+  row.classList.add("open");
+  const wrap = document.createElement("div");
+  wrap.className = "codefile";
+  wrap.innerHTML = `<pre>${esc(lastFiles[row.dataset.name] || "")}</pre>`;
+  row.after(wrap);
+}
+
 async function refreshCode() {
   if (!pid) return;
   try {
     const r = await api("GET", `/api/file?pid=${pid}`);
-    const names = Object.keys(r.files).sort();
-    $("#sb-code").innerHTML = names.length
-      ? names.map(n => `<div class="codefile"><div class="fname">${n}</div>` +
-          `<pre>${r.files[n].replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre></div>`).join("")
-      : '<span class="muted">(nothing written yet)</span>';
+    lastFiles = r.files;
+    renderFileTree(r.files);
   } catch (e) { /* informational */ }
 }
 
@@ -780,10 +956,176 @@ async function refreshLineage() {
   try {
     const rows = await api("GET", `/api/lineage?hearth=${hearth}`);
     $("#sb-lineage").innerHTML = rows.map(r =>
-      `<div class="trail-row"><span class="t">gen ${r.generation}</span>` +
-      `<span class="o" style="flex:1;text-align:left;margin-left:8px">${r.invocation}</span></div>`
+      `<div class="trail-row lineage-row${r.id === pid ? " current" : ""}" data-pid="${esc(r.id)}">` +
+      `<span class="t">gen ${r.generation}</span>` +
+      `<span class="o" style="flex:1;text-align:left;margin-left:8px">${esc(r.invocation)}</span></div>`
     ).join("") || '<span class="muted">(none yet)</span>';
+    $$("#sb-lineage .lineage-row").forEach(row => {
+      row.onclick = () => loadProphecy(row.dataset.pid);
+    });
   } catch (e) { /* lineage is informational; never block on it */ }
+}
+
+// switches the viewed prophecy without lighting anything -- if it has an
+// open frontier it is exactly as interactive as the one just lit; if it
+// has none (a finished generation, or a branch a sibling superseded) it
+// is naturally read-only, since the picker only ever attaches to
+// frontier nodes. No separate "read-only mode" needed.
+async function loadProphecy(newPid) {
+  try {
+    const st = await api("GET", `/api/state?pid=${encodeURIComponent(newPid)}`);
+    pid = newPid;
+    currentState = st;
+    saveSession();
+    updateSidebar();
+    await refreshLineage();
+    await refreshCode();
+    render();
+  } catch (e) { toast(e.message); }
+}
+
+async function refreshHistory() {
+  if (!pid) return;
+  $("#sb-diff").innerHTML = "";
+  try {
+    const r = await api("GET", `/api/gitlog?pid=${pid}`);
+    const commits = r.commits || [];
+    $("#sb-history").innerHTML = commits.length
+      ? commits.map(c => `<div class="commit-row" data-hash="${esc(c.hash)}">` +
+          `<span class="ch">${esc(c.hash.slice(0, 8))}</span>${esc(c.date.slice(0, 16))} ${esc(c.subject)}</div>`).join("")
+      : '<span class="muted">(no commits yet)</span>';
+    $$("#sb-history .commit-row").forEach(row => {
+      row.onclick = () => showDiff(row.dataset.hash);
+    });
+  } catch (e) { /* informational */ }
+}
+
+async function showDiff(hash) {
+  try {
+    const r = await api("GET", `/api/gitshow?pid=${pid}&hash=${hash}`);
+    const lines = (r.diff || "(empty commit -- nothing changed)").split("\n").map(l => {
+      const cls = l.startsWith("+") && !l.startsWith("+++") ? "add"
+        : l.startsWith("-") && !l.startsWith("---") ? "del" : "";
+      return cls ? `<span class="${cls}">${esc(l)}</span>` : esc(l);
+    }).join("\n");
+    $("#sb-diff").innerHTML = `<pre class="diffpre" style="margin-top:6px;background:#0d0b08;border:1px solid var(--panel-border);border-radius:5px;padding:8px;font-family:ui-monospace,monospace;font-size:11px;max-height:320px;overflow:auto">${lines}</pre>`;
+  } catch (e) { toast(e.message); }
+}
+
+async function refreshQuarantine() {
+  if (!pid) return;
+  try {
+    const r = await api("GET", `/api/quarantined?pid=${pid}`);
+    const names = Object.keys(r.files || {});
+    $("#sb-quarantine").innerHTML = names.length
+      ? names.map(n => `<div class="codefile"><div class="fname">${esc(n)}</div><pre>${esc(r.files[n])}</pre></div>`).join("")
+      : '<span class="muted">(none)</span>';
+  } catch (e) { /* informational */ }
+}
+
+// which arrangements this lineage could kindle into right now, and for
+// the ones it can't, why -- offerable[] already hides a graph whose root
+// torch this lineage's capabilities can't satisfy; missingcaps[] (via
+// /api/blocked) says which capability that was, so "why isn't g.schema
+// here" has an answer instead of just an absence.
+async function refreshArrangements() {
+  if (!pid || !currentState) { $("#sb-arrangements").innerHTML = '<span class="muted">(not at a kindling step)</span>'; return; }
+  const frontier = currentState.frontier || [];
+  const atKindling = frontier.some(id => {
+    const n = graph.nodes.find(x => x.id === id);
+    return n && (n.kind === "kindling" || id === "choose.graph");
+  });
+  if (!atKindling) { $("#sb-arrangements").innerHTML = '<span class="muted">(not at a kindling step)</span>'; return; }
+  try {
+    const rows = await api("GET", `/api/blocked?pid=${pid}`);
+    const offerable = new Set(currentState.offerable || []);
+    $("#sb-arrangements").innerHTML = rows.map(r => offerable.has(r.graph)
+      ? `<div class="offerable-row">${esc(r.graph)}</div>`
+      : `<div class="blocked-row"><span class="g">${esc(r.graph)}</span> -- <span class="why">needs ${esc((r.missing || []).join(", ") || "an earlier choice")}</span></div>`
+    ).join("") || '<span class="muted">(none)</span>';
+  } catch (e) { /* informational */ }
+}
+
+function renderLastCheck() {
+  const lc = currentState && currentState.lastcheck;
+  if (!lc || !lc.torch) { $("#sb-lastcheck").innerHTML = '<span class="muted">(nothing checked yet)</span>'; return; }
+  const ok = lc.option === "pass" || lc.option === "done";
+  $("#sb-lastcheck").innerHTML =
+    `<div class="trail-row"><span class="t">${esc(lc.torch)}</span><span class="o" style="color:${ok ? '#9fd98a' : 'var(--err)'}">${esc(lc.option)}</span></div>` +
+    (lc.output ? `<pre style="margin-top:4px;background:#0d0b08;border:1px solid var(--panel-border);border-radius:5px;padding:7px;font-family:ui-monospace,monospace;font-size:11px;max-height:200px;overflow:auto">${esc(lc.output)}</pre>` : "");
+}
+
+// ---- hearth archive ----
+
+function openDrawer() {
+  $("#hearths-drawer").classList.add("open");
+  $("#drawer-backdrop").classList.add("open");
+  fetchHearths();
+}
+function closeDrawer() {
+  $("#hearths-drawer").classList.remove("open");
+  $("#drawer-backdrop").classList.remove("open");
+}
+
+async function fetchHearths() {
+  try {
+    const rows = await api("GET", "/api/hearths");
+    rows.sort((a, b) => (b.born || "").localeCompare(a.born || ""));
+    $("#hearths-list").innerHTML = rows.length
+      ? rows.map(h => renderHearthCard(h)).join("")
+      : '<span class="muted">no hearths lit yet</span>';
+    $$(".hearth-card").forEach(card => {
+      card.onclick = (ev) => {
+        if (ev.target.closest("button")) return;
+        openHearth(card.dataset.id);
+      };
+    });
+    $$(".hc-halt").forEach(b => b.onclick = async () => { await api("POST", "/api/halt", { hearth: b.dataset.id }); fetchHearths(); });
+    $$(".hc-resume").forEach(b => b.onclick = async () => { await api("POST", "/api/resume", { hearth: b.dataset.id }); fetchHearths(); });
+    $$(".hc-label").forEach(b => b.onclick = async () => {
+      const txt = prompt("Label for this hearth:", b.dataset.current || "");
+      if (txt === null) return;
+      await api("POST", "/api/label", { hearth: b.dataset.id, label: txt.trim() });
+      fetchHearths();
+    });
+  } catch (e) {
+    $("#hearths-list").innerHTML = `<span class="muted">failed to load: ${esc(e.message)}</span>`;
+  }
+}
+
+function renderHearthCard(h) {
+  const label = h.label || h.id;
+  const mb = h.diskused ? (h.diskused / 1e6).toFixed(1) + " MB" : "0 MB";
+  const cap = h.diskcap ? (h.diskcap / 1e6).toFixed(0) + " MB cap" : "no cap";
+  const gens = h.maxproph ? `${h.generations}/${h.maxproph} gens` : `${h.generations} gens`;
+  return `
+    <div class="hearth-card${h.id === hearth ? " current" : ""}" data-id="${esc(h.id)}">
+      <div class="hc-top">
+        <span class="hc-label">${esc(label)}</span>
+        <span class="badge ${h.halted ? "halted" : "running"}">${h.halted ? "halted" : "active"}</span>
+      </div>
+      <div class="hc-ember">${esc(h.ember || "")}</div>
+      <div class="hc-meta">
+        <span>${esc(gens)}</span><span>${mb} / ${cap}</span><span>${esc((h.born || "").slice(0, 16))}</span>
+      </div>
+      <div class="hc-actions">
+        ${h.halted
+          ? `<button class="secondary hc-resume" data-id="${esc(h.id)}">resume</button>`
+          : `<button class="secondary hc-halt" data-id="${esc(h.id)}">halt</button>`}
+        <button class="secondary hc-label" data-id="${esc(h.id)}" data-current="${esc(h.label || "")}">rename</button>
+      </div>
+    </div>`;
+}
+
+async function openHearth(hid) {
+  try {
+    const rows = await api("GET", `/api/lineage?hearth=${hid}`);
+    if (!rows.length) { toast("that hearth has no prophecies"); return; }
+    hearth = hid;
+    await loadProphecy(rows[rows.length - 1].id);
+    closeDrawer();
+    toast(`opened ${hid}`, "ok");
+  } catch (e) { toast(e.message); }
 }
 
 async function light(torch, option) {
@@ -808,19 +1150,24 @@ function updateSidebar() {
   $("#sb-ember").textContent = currentState.ember || "(empty)";
   $("#sb-invocation").textContent = currentState.invocation || "(empty)";
   $("#sb-gen").textContent = `generation ${currentState.generation}`
-    + (currentState.parent ? ` · daughter of ${currentState.parent}` : " · founding prophecy");
+    + (currentState.parent ? ` · daughter of ${currentState.parent}` : " · founding prophecy")
+    + (currentState.halted ? " · HALTED" : "");
   const caps = currentState.capabilities || [];
   $("#sb-caps").innerHTML = caps.length
-    ? caps.map(c => `<span class="chip">${c}</span>`).join("")
+    ? caps.map(c => `<span class="chip">${esc(c)}</span>`).join("")
     : '<span class="muted">(none yet)</span>';
   const trail = currentState.trail || [];
   $("#sb-trail").innerHTML = trail.length
-    ? trail.map(r => `<div class="trail-row"><span class="t">${r.torch}</span><span class="o">${r.option}</span></div>`).join("")
+    ? trail.map(r => `<div class="trail-row"><span class="t">${esc(r.torch)}</span><span class="o">${esc(r.option)}</span></div>`).join("")
     : '<span class="muted">(none yet)</span>';
   const tree = currentState.tree || [];
   $("#sb-tree").innerHTML = tree.length
-    ? tree.map(f => `<div class="tree-line">${f}</div>`).join("")
+    ? tree.map(f => `<div class="tree-line">${esc(f)}</div>`).join("")
     : '<span class="muted">(empty)</span>';
+  renderLastCheck();
+  refreshArrangements();
+  refreshQuarantine();
+  refreshHistory();
 }
 
 async function loadGraph() {
@@ -888,7 +1235,14 @@ $("#begin-btn").onclick = async () => {
   const invocation = $("#invocation").value.trim();
   if (!invocation) { toast("enter an invocation first"); return; }
   try {
-    const res = await api("POST", "/api/begin", { invocation, autokindle: true });
+    const body = { invocation, autokindle: true };
+    const diskcap = $("#diskcap-input").value.trim();
+    const maxproph = $("#maxproph-input").value.trim();
+    const label = $("#label-input").value.trim();
+    if (diskcap) body.diskcap = Number(diskcap);
+    if (maxproph) body.maxproph = Number(maxproph);
+    if (label) body.label = label;
+    const res = await api("POST", "/api/begin", body);
     pid = res.pid;
     hearth = res.hearth;
     currentState = res.state;
@@ -905,12 +1259,18 @@ $("#begin-btn").onclick = async () => {
 
 $("#stop-btn").onclick = () => { stopRequested = true; status("stopping after this step…", true); };
 
-$("#reset-btn").onclick = () => {
+// purely the camera now -- it used to also drop the active session,
+// which is exactly the "why is the old hearth still there after I
+// clicked what I thought was a reset" confusion this split exists to
+// fix. Clearing the session is New Hearth's job alone.
+$("#reset-btn").onclick = () => resetView();
+
+function clearToIdle() {
   pid = null;
   hearth = null;
   currentState = null;
+  pendingInvocation = null;
   clearSession();
-  resetView();
   $("#sb-ember").textContent = "No hearth lit yet.";
   $("#sb-invocation").textContent = "—";
   $("#sb-gen").textContent = "";
@@ -921,7 +1281,31 @@ $("#reset-btn").onclick = () => {
   $("#sb-caps").innerHTML = "(none yet)";
   $("#sb-trail").innerHTML = "(none yet)";
   $("#sb-tree").innerHTML = "(empty)";
+  $("#sb-arrangements").innerHTML = "(not at a kindling step)";
+  $("#sb-lastcheck").innerHTML = "(nothing checked yet)";
+  $("#sb-history").innerHTML = "(no commits yet)";
+  $("#sb-diff").innerHTML = "";
+  $("#sb-quarantine").innerHTML = "(none)";
   render();
+}
+
+$("#new-hearth-btn").onclick = () => {
+  const mid_run = running || (currentState && (currentState.frontier || []).filter(Boolean).length > 0);
+  if (pid && mid_run && !confirm("This hearth is still active. It will keep existing and can be reopened from Hearths -- this just clears the view. Continue?")) return;
+  stopRequested = true;
+  clearToIdle();
+  $("#invocation").value = "";
+};
+
+$("#hearths-btn").onclick = openDrawer;
+$("#drawer-close").onclick = closeDrawer;
+$("#drawer-backdrop").onclick = closeDrawer;
+$("#history-refresh").onclick = refreshHistory;
+$("#quarantine-refresh").onclick = refreshQuarantine;
+
+$("#advanced-toggle").onclick = () => {
+  const open = $("#advanced-panel").classList.toggle("open");
+  $("#advanced-toggle").textContent = open ? "advanced options ▴" : "advanced options ▾";
 };
 
 loadGraph().then(reconnectSession).catch(e => toast(e.message));

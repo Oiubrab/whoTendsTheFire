@@ -447,6 +447,12 @@ fork: {[hid]
   `members insert update lib:hid from select from members where lib=`main;
   `edges   insert update lib:hid from select from edges   where lib=`main; }
 
+/ RUNS_OVERRIDE-aware for the same reason DBDIR is: an isolated test
+/ bridge that halts a hearth must not write its sentinel into the real
+/ repo's runs/ -- this was the one place still hardcoded to "runs/",
+/ found only by actually exercising halthearth[] against a test bridge.
+RUNSDIR: {[] d: getenv `RUNS_OVERRIDE; $[0 = count d; "runs"; d]}[]
+
 ignite: {[hid;emberText;evo]
   lb: $[evo; hid; `main];
   `hearths upsert ([id: enlist hid]
@@ -455,9 +461,15 @@ ignite: {[hid;emberText;evo]
     lib: enlist lb;
     diskcap: enlist 2000000000;
     maxproph: enlist 0;
-    halt: enlist "runs/",string[hid],"/HALT";
+    halt: enlist RUNSDIR,"/",string[hid],"/HALT";
     born: enlist .z.p);
   if[evo; fork[hid]]; }
+
+/ overrides ignite[]'s defaults -- called right after it, not folded in,
+/ so a caller that doesn't care about caps (every existing call site)
+/ is unaffected.
+setcaps: {[hid;dcap;mprph]
+  update diskcap: dcap, maxproph: mprph from `hearths where id=hid; }
 
 begin: {[hid;pid;g;invocation;dest]
   `prophecies upsert ([id: enlist pid]
@@ -473,7 +485,14 @@ begin: {[hid;pid;g;invocation;dest]
 
 / a plain recursive file listing of the working directory -- the "basic
 / tree of the codebase" a torch needs to judge where something belongs.
-tree: {[dest] last runin[dest; "find . -type f -not -name '.*' -not -path '*/__pycache__/*' -not -name '*.pyc' | sort"]}
+/ -not -path '*/.*' (not -not -name '.*') -- the old form only excluded
+/ dot-NAMED files, so once a prophecy's dest held a real .git/ (every
+/ graph commits now, via git.commit), every file inside .git/objects/
+/ has a non-dot name and sailed straight through. Thousands of git blob
+/ paths were going into every single torch's brief from generation one
+/ onward, undetected because nothing had looked at a dest past a few
+/ commits until the UI's new file browser rendered one.
+tree: {[dest] last runin[dest; "find . -type f -not -path '*/.*' -not -path '*/__pycache__/*' -not -name '*.pyc' | sort"]}
 
 / full snapshot of one prophecy -- what a UI needs on every refresh.
 / Which graphs in the library this prophecy could actually walk, judged by
@@ -494,9 +513,10 @@ state: {[pid]
   p: prophecies[pid];
   h: hearths[p`hearth];
   trail: 0!select seq,torch,option from chronicle where prophecy=pid;
-  `invocation`ember`dest`graph`hearth`parent`generation`frontier`trail`capabilities`offerable`tree!
+  `invocation`ember`dest`graph`hearth`parent`generation`frontier`trail`capabilities`offerable`tree`lastcheck`halted!
     (p`invocation; h`ember; p`dest; p`graph; p`hearth; p`parent; p`generation;
-     p`frontier; trail; capabilities[pid]; offerable[pid]; tree p`dest) }
+     p`frontier; trail; capabilities[pid]; offerable[pid]; tree p`dest;
+     lastcheck[pid]; hearthhalted p`hearth) }
 
 logchoice: {[pid;tid;opt]
   seq: 1 + max (0j, exec seq from chronicle where prophecy=pid);
@@ -653,6 +673,59 @@ dirsize: {[path]
 hearthdisk: {[hid]
   ds: exec distinct dest from prophecies where hearth=hid;
   $[0 = count ds; 0j; sum dirsize each ds] }
+
+/ same check maykindle makes, exposed on its own so the UI can show
+/ halted status without re-deriving it and risking the two diverging.
+hearthhalted: {[hid] 0 < count key hsym `$hearths[hid][`halt]}
+
+/ the halt path's directory is never otherwise created -- it is a flat
+/ sentinel location, deliberately separate from a prophecy's dest so it
+/ survives even if dest is wiped -- so touch alone fails on a hearth
+/ that has never been halted before. Found by actually calling this
+/ against a hearth with no runs/<hid>/ directory yet.
+halthearth: {[hid]
+  p: hearths[hid][`halt];
+  dir: "/" sv -1 _ "/" vs p;
+  system "mkdir -p ",sqquote dir;
+  system "touch ",sqquote p; }
+resumehearth: {[hid] system "rm -f ",sqquote hearths[hid][`halt]; }
+
+/ one row per hearth, the overview an archive/dashboard needs: nothing
+/ here is new data, just hearthdisk/hearthhalted/chronicle joined so the
+/ UI does not have to make one request per hearth to build a list.
+hearthlist: {[]
+  hs: 0!hearths;
+  if[0 = count hs; :hs];
+  gens: {[hid] count select from prophecies where hearth=hid}each hs`id;
+  update generations: gens, halted: hearthhalted each id,
+    diskused: hearthdisk each id, label: hearthlabel each id from hs }
+
+/ a human label, kept in its own table rather than added as a column to
+/ `hearths` -- amending an existing keyed table's schema means every
+/ already-persisted db/hearths on disk (including the real one) would
+/ need migrating before loaddb could read it back, and a bad migration
+/ there is not a recoverable mistake.
+hearthmeta: ([hearth:`symbol$()] label:())
+/ not @[f;hid;""] -- first on an empty result here is q's generic null
+/ `::`, not a thrown error, so the protected-eval fallback never fires
+/ and "" never gets a chance to apply; .j.j then serializes `::` as the
+/ JSON empty array, not an empty string, which looked like a type error
+/ in every hearth that has never been labelled.
+hearthlabel: {[hid] r: exec label from hearthmeta where hearth=hid; $[0=count r; ""; first r]}
+setlabel: {[hid;txt] `hearthmeta upsert (hid;txt); }
+
+/ which capabilities a graph's root torch(es) still need that this
+/ lineage hasn't earned -- offerable[] already hides graphs that fail
+/ this, but hiding without saying why left "why can't I pick g.schema"
+/ unanswerable from the UI. Same eligibility check, just not collapsed
+/ to a boolean.
+missingcaps: {[pid;tid] (exec capability from requires where torch=tid) except capabilities[pid]}
+
+offerableDetail: {[pid]
+  p: prophecies[pid];
+  gs: exec id from graphs where lib=p`lib;
+  ([] graph: gs;
+      missing: {[pid;lb;g] distinct raze missingcaps[pid] each roots[lb;g]}[pid;p`lib] each gs) }
 
 / every h`field below is bracket notation, h[`field], never backtick
 / sugar -- this torch sat unexercised long enough that nobody noticed
@@ -889,14 +962,18 @@ savedb: {[]
   (hsym `$DBDIR,"/hearths") set hearths;
   (hsym `$DBDIR,"/prophecies") set prophecies;
   (hsym `$DBDIR,"/chronicle") set chronicle;
-  (hsym `$DBDIR,"/laststatus") set laststatus; }
+  (hsym `$DBDIR,"/laststatus") set laststatus;
+  (hsym `$DBDIR,"/hearthmeta") set hearthmeta; }
 
 loaddb: {[]
   hearths::get hsym `$DBDIR,"/hearths";
   prophecies::get hsym `$DBDIR,"/prophecies";
   chronicle::get hsym `$DBDIR,"/chronicle";
-  / guarded: a db/ written before laststatus existed has no file for it.
-  / Falling back to the fresh empty table declared above, rather than
-  / letting a missing file crash every single boot of an existing hearth.
+  / guarded: a db/ written before laststatus (or hearthmeta) existed has
+  / no file for it. Falling back to the fresh empty table declared above,
+  / rather than letting a missing file crash every single boot of an
+  / existing hearth.
   laststatus::@[{get hsym `$DBDIR,"/laststatus"}; ::;
-    {([prophecy:`symbol$()] torch:`symbol$(); option:`symbol$(); output:())}]; }
+    {([prophecy:`symbol$()] torch:`symbol$(); option:`symbol$(); output:())}];
+  hearthmeta::@[{get hsym `$DBDIR,"/hearthmeta"}; ::;
+    {([hearth:`symbol$()] label:())}]; }

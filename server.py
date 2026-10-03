@@ -483,6 +483,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(result)
             elif parsed.path == "/api/graphs":
                 self._send_json(run_q("res: 0!graphs"))
+            elif parsed.path == "/api/hearths":
+                # the archive/dashboard view: every hearth that has ever
+                # existed, not just the one session.json remembers.
+                self._send_json(run_q("res: 0!hearthlist[]"))
+            elif parsed.path == "/api/blocked":
+                qs = urllib.parse.parse_qs(parsed.query)
+                pid = qs["pid"][0]
+                self._send_json(run_q(f"res: 0!offerableDetail[{qsym(pid)}]"))
+            elif parsed.path == "/api/quarantined":
+                qs = urllib.parse.parse_qs(parsed.query)
+                pid = qs["pid"][0]
+                dest = run_q(f"res: exec first dest from prophecies where id={qsym(pid)}")
+                qdir = os.path.join(dest, "tests", "quarantine")
+                out = {}
+                if os.path.isdir(qdir):
+                    for f in sorted(os.listdir(qdir)):
+                        try:
+                            with open(os.path.join(qdir, f)) as fh:
+                                out[f] = fh.read()
+                        except OSError:
+                            pass
+                self._send_json({"files": out})
+            elif parsed.path == "/api/gitlog":
+                qs = urllib.parse.parse_qs(parsed.query)
+                pid = qs["pid"][0]
+                dest = run_q(f"res: exec first dest from prophecies where id={qsym(pid)}")
+                proc = subprocess.run(
+                    ["git", "-C", dest, "log", "--pretty=format:%H%x1f%ad%x1f%s", "--date=iso-strict"],
+                    capture_output=True, text=True, timeout=20)
+                commits = []
+                for line in proc.stdout.splitlines():
+                    parts = line.split("\x1f")
+                    if len(parts) == 3:
+                        commits.append({"hash": parts[0], "date": parts[1], "subject": parts[2]})
+                self._send_json({"commits": commits})
+            elif parsed.path == "/api/gitshow":
+                qs = urllib.parse.parse_qs(parsed.query)
+                pid, h = qs["pid"][0], qs["hash"][0]
+                dest = run_q(f"res: exec first dest from prophecies where id={qsym(pid)}")
+                if not re.fullmatch(r"[0-9a-f]{4,40}", h):
+                    self._send_json({"error": "bad commit hash"}, 400)
+                    return
+                proc = subprocess.run(
+                    ["git", "-C", dest, "show", "--format=", h],
+                    capture_output=True, text=True, timeout=20)
+                self._send_json({"diff": proc.stdout})
             elif parsed.path == "/api/lineage":
                 qs = urllib.parse.parse_qs(parsed.query)
                 hid = qs["hearth"][0]
@@ -497,9 +543,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 pid = qs["pid"][0]
                 dest = run_q(f"res: exec first dest from prophecies where id={qsym(pid)}")
                 out = {}
-                for root, _, names in os.walk(dest):
-                    if "__pycache__" in root:
-                        continue
+                for root, dirs, names in os.walk(dest):
+                    # prune in place, not just skip -- os.walk still descends
+                    # into (and lists) every directory it yields unless the
+                    # dirs list itself is edited, so .git/objects was being
+                    # fully walked and read into the response (see tree[]'s
+                    # matching fix in q/torches.q for how this went unnoticed).
+                    dirs[:] = [d for d in dirs if d != "__pycache__" and not d.startswith(".")]
                     for n in names:
                         if n.startswith(".") or n.endswith(".pyc"):
                             continue
@@ -554,8 +604,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # hearth and a hex name on it was pure noise.
                 dest = os.path.join(RUNS_DIR, f"{stamp}-{slug}-{hid[1:5]}", "app")
                 os.makedirs(RUNS_DIR, exist_ok=True)
+                # 0 means unlimited on both, matching ignite[]'s own defaults
+                # -- only overridden when the caller actually sent a value.
+                diskcap = int(body.get("diskcap") or 0)
+                maxproph = int(body.get("maxproph") or 0)
+                label = body.get("label", "")
                 expr = (
                     f"ignite[{qsym(hid)};{qstr(invocation)};{'1b' if evolution else '0b'}];"
+                    f"{'setcaps[' + qsym(hid) + ';' + str(diskcap) + 'j;' + str(maxproph) + 'j];' if (diskcap or maxproph) else ''}"
+                    f"{'setlabel[' + qsym(hid) + ';' + qstr(label) + '];' if label else ''}"
                     f"begin[{qsym(hid)};{qsym(pid)};{qsym(graph)};{qstr(invocation)};{qstr(dest)}];"
                     f"res: state[{qsym(pid)}]"
                 )
@@ -675,6 +732,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 pid, path, content = body["pid"], body["path"], body["content"]
                 expr = f"res: author[{qsym(pid)};{qstr(path)};{qstr(content)}]"
                 self._send_json({"bytes": run_q(expr)})
+            elif parsed.path == "/api/halt":
+                hid = body["hearth"]
+                run_q(f"halthearth[{qsym(hid)}]; res: 1b")
+                self._send_json({"halted": True})
+            elif parsed.path == "/api/resume":
+                hid = body["hearth"]
+                run_q(f"resumehearth[{qsym(hid)}]; res: 1b")
+                self._send_json({"halted": False})
+            elif parsed.path == "/api/label":
+                hid, txt = body["hearth"], body.get("label", "")
+                run_q(f"setlabel[{qsym(hid)};{qstr(txt)}]; res: 1b")
+                self._send_json({"label": txt})
             elif parsed.path == "/api/quarantine":
                 # A model-authored test can simply be wrong. After repair has
                 # had its go, set the test aside rather than let a bad
