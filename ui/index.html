@@ -81,6 +81,12 @@
   .home-form input[type=text]:focus { outline: 1px solid var(--frontier); }
   .home-form button { padding: 11px 20px; }
   .home-section { max-width: 920px; margin: 0 auto; width: 100%; }
+  #home-banner {
+    background: #241a10; border: 1px solid var(--frontier); border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 28px; font-size: 13px; color: var(--ink);
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  #home-banner button { padding: 5px 12px; font-size: 12px; }
   .home-section h2 {
     font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--ink-dim); display: flex; justify-content: space-between; align-items: center;
@@ -143,6 +149,17 @@
     padding-bottom: 4px;
   }
   aside h2:first-child { margin-top: 0; }
+  .tabbar {
+    display: flex; gap: 2px; background: #0f0c09; border: 1px solid var(--panel-border);
+    border-radius: 7px; padding: 3px; margin-bottom: 4px;
+  }
+  .tabbtn {
+    flex: 1; background: transparent; color: var(--ink-dim); border: none;
+    font-size: 11.5px; font-weight: 500; padding: 7px 4px; border-radius: 5px; cursor: pointer;
+  }
+  .tabbtn:hover { color: var(--ink); }
+  .tabbtn.active { background: var(--panel-border); color: var(--frontier-glow); }
+  .tabpanel[hidden] { display: none; }
   .invocation-text {
     font-style: italic;
     color: var(--ink);
@@ -359,6 +376,7 @@
 </nav>
 
 <section class="screen" id="screen-home">
+  <div id="home-banner" class="home-section" style="display:none"></div>
   <div class="home-hero">
     <h1>&#128293; whoTendsTheFire</h1>
     <p class="tagline">Law, choice, and invention. Say what to build, and a hearth tends itself.</p>
@@ -402,43 +420,53 @@
       <div id="toast"></div>
     </div>
     <aside>
-      <h2>Ember</h2>
-      <div class="invocation-text muted" id="sb-ember">No hearth lit yet.</div>
+      <div class="invocation-text muted" id="sb-ember" style="margin-bottom:10px">No hearth lit yet.</div>
+      <div class="tabbar">
+        <button class="tabbtn active" data-tab="overview">Overview</button>
+        <button class="tabbtn" data-tab="timeline">Timeline</button>
+        <button class="tabbtn" data-tab="code">Code</button>
+        <button class="tabbtn" data-tab="checks">Checks</button>
+      </div>
 
-      <h2>This prophecy</h2>
-      <div class="invocation-text muted" id="sb-invocation">—</div>
-      <div class="muted" id="sb-gen" style="margin-top:6px"></div>
+      <div class="tabpanel" data-tab="overview">
+        <h2>This prophecy</h2>
+        <div class="invocation-text muted" id="sb-invocation">—</div>
+        <div class="muted" id="sb-gen" style="margin-top:6px"></div>
 
-      <h2>Capabilities</h2>
-      <div id="sb-caps" class="muted">(none yet)</div>
+        <h2>Capabilities</h2>
+        <div id="sb-caps" class="muted">(none yet)</div>
 
-      <h2>Arrangements</h2>
-      <div id="sb-arrangements" class="muted">(not at a kindling step)</div>
+        <h2>Arrangements</h2>
+        <div id="sb-arrangements" class="muted">(not at a kindling step)</div>
 
-      <h2>Last check</h2>
-      <div id="sb-lastcheck" class="muted">(nothing checked yet)</div>
+        <h2>Last check</h2>
+        <div id="sb-lastcheck" class="muted">(nothing checked yet)</div>
 
-      <h2>Torches lit so far</h2>
-      <div id="sb-trail" class="muted">(none yet)</div>
+        <h2>What it printed when run</h2>
+        <pre id="sb-output" class="runout">(not run yet)</pre>
+      </div>
 
-      <h2>Codebase</h2>
-      <div id="sb-tree" class="muted">(empty)</div>
+      <div class="tabpanel" data-tab="timeline" hidden>
+        <h2>Torches lit so far</h2>
+        <div id="sb-trail" class="muted">(none yet)</div>
 
-      <h2>Lineage</h2>
-      <div id="sb-lineage" class="muted">(none yet)</div>
+        <h2>Lineage</h2>
+        <div id="sb-lineage" class="muted">(none yet)</div>
+      </div>
 
-      <h2>Code produced</h2>
-      <div id="sb-code" class="muted">(nothing written yet)</div>
+      <div class="tabpanel" data-tab="code" hidden>
+        <h2>Code produced</h2>
+        <div id="sb-code" class="muted">(nothing written yet)</div>
+      </div>
 
-      <h2>History <button class="secondary iconbtn" id="history-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
-      <div id="sb-history" class="muted">(no commits yet)</div>
-      <div id="sb-diff"></div>
+      <div class="tabpanel" data-tab="checks" hidden>
+        <h2>History <button class="secondary iconbtn" id="history-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
+        <div id="sb-history" class="muted">(no commits yet)</div>
+        <div id="sb-diff"></div>
 
-      <h2>Quarantined tests <button class="secondary iconbtn" id="quarantine-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
-      <div id="sb-quarantine" class="muted">(none)</div>
-
-      <h2>What it printed when run</h2>
-      <pre id="sb-output" class="runout">(not run yet)</pre>
+        <h2>Quarantined tests <button class="secondary iconbtn" id="quarantine-refresh" style="padding:2px 8px;font-size:10px">refresh</button></h2>
+        <div id="sb-quarantine" class="muted">(none)</div>
+      </div>
     </aside>
   </main>
 </section>
@@ -822,6 +850,26 @@ let workingTorch = null;
 function status(msg, busy) {
   $("#status").textContent = msg;
   $("#statusbar").classList.toggle("busy", !!busy);
+  updateHomeBanner();
+}
+
+// autoRun can be driving a lineage while the person is sitting on Home
+// (reconnecting on load never jumps screens anymore -- see
+// reconnectSession) -- begin-btn stays correctly disabled the whole time
+// (two lineages sharing the one module-scoped `pid` would corrupt both),
+// but a disabled button with no explanation reads as broken. This is the
+// explanation, shown only while there is something to explain.
+function updateHomeBanner() {
+  const b = $("#home-banner");
+  if (!b) return;
+  if (running && pid && currentState) {
+    b.style.display = "flex";
+    b.innerHTML = `<span>building in the background: <strong>${esc(currentState.ember || pid)}</strong> -- ${esc($("#status").textContent)}</span>` +
+      `<button id="home-banner-view">view</button>`;
+    $("#home-banner-view").onclick = () => showScreen("prophecy");
+  } else {
+    b.style.display = "none";
+  }
 }
 
 function setWorking(id) { workingTorch = id; render(); }
@@ -1115,7 +1163,7 @@ function showScreen(name) {
   if (name === "home") $("#nav-home-btn").classList.add("active");
   if (name === "hearths") $("#nav-hearths-btn").classList.add("active");
   $("#nav-current").textContent = (name === "prophecy" && currentState) ? currentState.ember || "" : "";
-  if (name === "home") refreshHomeRecent();
+  if (name === "home") { refreshHomeRecent(); updateHomeBanner(); }
   if (name === "hearths") fetchHearths();
 }
 
@@ -1238,10 +1286,6 @@ function updateSidebar() {
   $("#sb-trail").innerHTML = trail.length
     ? trail.map(r => `<div class="trail-row"><span class="t">${esc(r.torch)}</span><span class="o">${esc(r.option)}</span></div>`).join("")
     : '<span class="muted">(none yet)</span>';
-  const tree = currentState.tree || [];
-  $("#sb-tree").innerHTML = tree.length
-    ? tree.map(f => `<div class="tree-line">${esc(f)}</div>`).join("")
-    : '<span class="muted">(empty)</span>';
   renderLastCheck();
   refreshArrangements();
   refreshQuarantine();
@@ -1288,19 +1332,21 @@ async function reconnectSession() {
     hearth = saved.hearth;
     pendingInvocation = saved.pendingInvocation || null;
     currentState = st;
-    $("#invocation").value = st.invocation || st.ember || "";
     updateSidebar();
     await refreshLineage();
     await refreshCode();
     render();
-    showScreen("prophecy");
+    // deliberately NOT showScreen("prophecy") -- the landing page is
+    // Home, always, every single load, with no exception for "but there
+    // was a session." Reconnecting restores the in-memory state (so the
+    // hearth card is instant to open, and an active lineage keeps being
+    // driven in the background exactly as the comment on SESSION_KEY
+    // above describes) without silently deciding what the person wants
+    // to look at.
     const fr = (st.frontier || []).filter(Boolean);
     if (fr.length) {
-      toast(`reconnected to generation ${st.generation} — resuming`, "ok");
+      toast(`resuming generation ${st.generation} in the background`, "ok");
       if ($("#auto-chk").checked) autoRun();
-      else status(`reconnected, paused at ${fr.join(", ")}`, false);
-    } else {
-      toast(`reconnected to generation ${st.generation} — prophecy already complete`, "ok");
     }
   } catch (e) {
     // the saved pid no longer resolves -- a wiped or rebuilt db/, most
@@ -1360,7 +1406,6 @@ function clearToIdle() {
   status("idle", false);
   $("#sb-caps").innerHTML = "(none yet)";
   $("#sb-trail").innerHTML = "(none yet)";
-  $("#sb-tree").innerHTML = "(empty)";
   $("#sb-arrangements").innerHTML = "(not at a kindling step)";
   $("#sb-lastcheck").innerHTML = "(nothing checked yet)";
   $("#sb-history").innerHTML = "(no commits yet)";
@@ -1381,6 +1426,12 @@ $("#leave-btn").onclick = () => {
   $("#invocation").value = "";
   showScreen("home");
 };
+
+$$(".tabbtn").forEach(b => b.onclick = () => {
+  $$(".tabbtn").forEach(x => x.classList.remove("active"));
+  b.classList.add("active");
+  $$(".tabpanel").forEach(p => p.hidden = p.dataset.tab !== b.dataset.tab);
+});
 
 $("#nav-brand").onclick = () => showScreen("home");
 $("#nav-home-btn").onclick = () => showScreen("home");
