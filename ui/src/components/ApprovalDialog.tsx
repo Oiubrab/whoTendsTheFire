@@ -1,40 +1,42 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { useEffect, useState } from "react"
-import { useRunStore, type PendingApproval } from "../lib/runStore"
+import { toast } from "sonner"
+import { useRunStore, firstPendingApproval, type PendingApproval } from "../lib/runStore"
 import { api } from "../api/client"
 import type { BlockedRow } from "../api/types"
 import { GraphChip } from "./Badges"
 
-// The "approve each generation" run mode's gate: kindle.next has already
-// proposed a sentence, and this is the one moment before a daughter
-// prophecy actually spawns. Reject ends the lineage cleanly (the same
-// `decline` path a model-declined generation takes); accept requires
-// picking which arrangement fits, defaulted to the model's own
-// classification so accepting needs no typing in the common case.
+// The "approve each generation" run mode's gate -- now server-driven
+// (Phase 2): kindle.next proposed a sentence inside runner.py's
+// background thread, which is blocked waiting on POST /api/runs/approve
+// for as long as this stays open, from ANY tab, even one that reloaded
+// after the run started. The dialog itself still asks the bridge for the
+// model's suggested arrangement and which graphs are blocked (and why),
+// same as Phase 1 -- that part didn't need the server-side runner to work.
 //
 // Just a store-reading wrapper: the real component below is remounted
 // (via `key`) for every new approval rather than resetting its own state
 // in an effect, so there is no synchronous setState-in-effect on open.
 export function ApprovalDialog() {
-  const pending = useRunStore((s) => s.pendingApproval)
+  const pending = useRunStore((s) => firstPendingApproval(s.runs))
   if (!pending) return null
-  return <ApprovalDialogInner key={`${pending.pid}:${pending.torch}:${pending.invocation}`} pending={pending} />
+  return <ApprovalDialogInner key={`${pending.hearth}:${pending.pid}:${pending.invocation}`} pending={pending} />
 }
 
 function ApprovalDialogInner({ pending }: { pending: PendingApproval }) {
-  const resolve = useRunStore((s) => s.resolveApproval)
+  const upsert = useRunStore((s) => s.upsert)
   const [blocked, setBlocked] = useState<BlockedRow[] | null>(null)
   const [graph, setGraph] = useState<string | null>(null)
   const [suggesting, setSuggesting] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       const [b, c] = await Promise.all([
         api.blocked(pending.pid),
-        // "choose.graph" literally -- pending.torch is kindle.next's id
-        // (the torch that proposed the invocation), not the decision
-        // torch that classifies it. See autorun.ts's matching fix.
+        // "choose.graph" literally -- the torch that proposed the
+        // invocation was kindle.next, not the one that classifies it.
         api.choosegraph(pending.pid, "choose.graph", pending.invocation),
       ])
       if (cancelled) return
@@ -49,8 +51,23 @@ function ApprovalDialogInner({ pending }: { pending: PendingApproval }) {
 
   const offerableSet = new Set(pending.offerable)
 
+  const resolve = async (action: "accept" | "reject", chosenGraph?: string) => {
+    setSubmitting(true)
+    try {
+      await api.runsApprove(pending.hearth, action, chosenGraph)
+      // optimistic -- the matching SSE event (kindled/generation_end)
+      // will arrive and settle everything properly, but clearing this
+      // now means the dialog closes the instant the click is honored
+      // instead of waiting on a round trip through the event stream.
+      upsert(pending.hearth, { pendingApproval: null })
+    } catch (e) {
+      toast.error((e as Error).message)
+      setSubmitting(false)
+    }
+  }
+
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && resolve({ action: "reject" })}>
+    <Dialog.Root open onOpenChange={(o) => !o && resolve("reject")}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60" />
         <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line2 bg-char p-5">
@@ -93,14 +110,15 @@ function ApprovalDialogInner({ pending }: { pending: PendingApproval }) {
 
           <div className="mt-5 flex justify-end gap-2">
             <button
-              onClick={() => resolve({ action: "reject" })}
-              className="rounded-md border border-line2 px-3.5 py-1.5 text-[13px] text-ash hover:text-bone"
+              onClick={() => resolve("reject")}
+              disabled={submitting}
+              className="rounded-md border border-line2 px-3.5 py-1.5 text-[13px] text-ash hover:text-bone disabled:opacity-50"
             >
               Reject, end lineage
             </button>
             <button
-              onClick={() => graph && resolve({ action: "accept", graph })}
-              disabled={!graph}
+              onClick={() => graph && resolve("accept", graph)}
+              disabled={!graph || submitting}
               className="rounded-md bg-ember px-3.5 py-1.5 text-[13px] font-semibold text-[#1b1009] hover:bg-ember2 disabled:opacity-50"
             >
               Accept &amp; kindle

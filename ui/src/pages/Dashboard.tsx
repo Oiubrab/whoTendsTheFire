@@ -2,13 +2,12 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { useHearths, useGraphLibrary } from "../api/hooks"
+import { useHearths } from "../api/hooks"
 import { api } from "../api/client"
 import { HearthCard } from "../components/HearthCard"
 import { StatusPill } from "../components/Badges"
 import { fmtDate } from "../lib/format"
 import { useRunStore, type RunMode } from "../lib/runStore"
-import { runAutoLoop } from "../lib/autorun"
 
 const EXAMPLES = [
   "a CLI that renames photos by EXIF date",
@@ -26,14 +25,14 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { data: hearths } = useHearths()
-  const { data: graphLib } = useGraphLibrary()
+  const liveRuns = useRunStore((s) => s.runs)
   const [invocation, setInvocation] = useState("")
   const [mode, setMode] = useState<RunMode>("approve")
   const [maxGens, setMaxGens] = useState("")
   const [diskCap, setDiskCap] = useState("")
   const [starting, setStarting] = useState(false)
 
-  const running = (hearths ?? []).filter((h) => !h.halted)
+  const running = Object.values(liveRuns)
   const halted = (hearths ?? []).filter((h) => h.halted)
   const recent = [...(hearths ?? [])].sort((a, b) => b.born.localeCompare(a.born)).slice(0, 6)
 
@@ -49,11 +48,14 @@ export default function Dashboard() {
       if (diskCap.trim()) body.diskcap = Number(diskCap) * 1_000_000
       const res = await api.begin(body)
       qc.invalidateQueries({ queryKey: ["hearths"] })
-      useRunStore.getState().setRunMode(mode)
       setInvocation("")
       navigate(`/hearths/${res.hearth}/graph`)
-      if (mode !== "step" && graphLib) {
-        runAutoLoop(res.pid, res.hearth, graphLib.nodes, qc)
+      // runner.py drives it from here -- Phase 2 moved the loop off this
+      // tab entirely, so starting it is one POST, not a function this
+      // page has to keep running. Step mode starts no runner at all;
+      // the Graph tab's manual controls are step mode's whole interface.
+      if (mode !== "step") {
+        await api.runsStart(res.hearth, res.pid, mode)
       }
     } catch (err) {
       toast.error((err as Error).message)
@@ -142,8 +144,8 @@ export default function Dashboard() {
             <div className="p-4 text-[13px] text-dim">Nothing is building right now.</div>
           ) : (
             <div className="divide-y divide-line">
-              {running.map((h) => (
-                <AttentionRow key={h.id} hearth={h} kind="live" />
+              {running.map((r) => (
+                <RunningRow key={r.hearth} run={r} hearth={hearths?.find((h) => h.id === r.hearth)} />
               ))}
             </div>
           )}
@@ -158,7 +160,7 @@ export default function Dashboard() {
           ) : (
             <div className="divide-y divide-line">
               {halted.map((h) => (
-                <AttentionRow key={h.id} hearth={h} kind="warn" />
+                <AttentionRow key={h.id} hearth={h} />
               ))}
             </div>
           )}
@@ -186,17 +188,15 @@ export default function Dashboard() {
   )
 }
 
-function AttentionRow({ hearth, kind }: { hearth: NonNullable<ReturnType<typeof useHearths>["data"]>[number]; kind: "live" | "warn" }) {
+function AttentionRow({ hearth }: { hearth: NonNullable<ReturnType<typeof useHearths>["data"]>[number] }) {
   const navigate = useNavigate()
   return (
     <div className="flex items-start gap-3.5 px-4 py-3">
-      <span className={`mt-0.5 h-full w-[3px] self-stretch rounded ${kind === "live" ? "bg-ember" : "bg-warn"}`} />
+      <span className="mt-0.5 h-full w-[3px] self-stretch rounded bg-warn" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-bone">{hearth.label || hearth.id}</span>
-          <StatusPill kind={kind} pulse={kind === "live"}>
-            {kind === "live" ? "running" : "halted"}
-          </StatusPill>
+          <StatusPill kind="warn">halted</StatusPill>
         </div>
         <div className="mt-0.5 truncate text-[12.5px] text-ash">
           generation {hearth.generations} · {hearth.ember}
@@ -205,6 +205,33 @@ function AttentionRow({ hearth, kind }: { hearth: NonNullable<ReturnType<typeof 
       </div>
       <button
         onClick={() => navigate(`/hearths/${hearth.id}`)}
+        className="shrink-0 rounded-md border border-line2 px-2.5 py-1 text-[12px] text-ash hover:text-bone"
+      >
+        Open
+      </button>
+    </div>
+  )
+}
+
+function RunningRow({ run, hearth }: { run: ReturnType<typeof useRunStore.getState>["runs"][string]; hearth?: NonNullable<ReturnType<typeof useHearths>["data"]>[number] }) {
+  const navigate = useNavigate()
+  return (
+    <div className="flex items-start gap-3.5 px-4 py-3">
+      <span className="mt-0.5 h-full w-[3px] self-stretch rounded bg-ember" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-bone">{hearth?.label || hearth?.id || run.hearth}</span>
+          <StatusPill kind="live" pulse>
+            {run.pendingApproval ? "waiting for you" : "running"}
+          </StatusPill>
+        </div>
+        <div className="mt-0.5 truncate text-[12.5px] text-ash">
+          {hearth?.ember || ""}
+          {run.status ? ` — ${run.status}` : ""}
+        </div>
+      </div>
+      <button
+        onClick={() => navigate(`/hearths/${run.hearth}/graph`)}
         className="shrink-0 rounded-md border border-line2 px-2.5 py-1 text-[12px] text-ash hover:text-bone"
       >
         Open

@@ -135,3 +135,33 @@ export interface KindleResult {
   pid: string
   state: ProphecyState
 }
+
+// Shapes the Phase 2 server-side runner (runner.py) sends, over both
+// GET /api/runs (a snapshot) and GET /api/events (as they happen). Named
+// "Server*" to keep them visibly distinct from lib/runStore's LiveRun,
+// which is the normalized, hearth-keyed shape the UI actually reads --
+// pendingApproval here has no `hearth` field since it's already nested
+// under one in the snapshot; the event stream repeats it at the top
+// level instead since an event isn't nested under anything.
+export interface ServerPendingApproval {
+  pid: string
+  invocation: string
+  offerable: string[]
+}
+
+export interface ServerRunStatus {
+  hearth: string
+  pid: string
+  mode: string
+  status: string
+  pendingApproval: ServerPendingApproval | null
+}
+
+export type RunEvent =
+  | { type: "approval_needed"; hearth: string; pid: string; invocation: string; offerable: string[] }
+  | { type: "torch"; hearth: string; pid: string; torch: string; kind: string; option: string; filesWritten: number }
+  | { type: "generation_start"; hearth: string; pid: string }
+  | { type: "generation_end"; hearth: string; pid: string; reason: string }
+  | { type: "kindled"; hearth: string; pid: string; generation: number; graph: string }
+  | { type: "error"; hearth: string; message: string }
+  | { type: "runner_finished"; hearth: string; pid: string; status: string }

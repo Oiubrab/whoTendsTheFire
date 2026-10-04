@@ -1,12 +1,10 @@
 import { NavLink, Outlet, useParams, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { useHearths, useLineage, useProphecyState, useGraphLibrary, useInvalidateRun } from "../../api/hooks"
+import { useHearths, useLineage, useProphecyState, useInvalidateRun } from "../../api/hooks"
 import { StatusPill, hearthStatus } from "../../components/Badges"
 import { api } from "../../api/client"
 import { fmtDate } from "../../lib/format"
 import { useRunStore } from "../../lib/runStore"
-import { runAutoLoop } from "../../lib/autorun"
-import { useQueryClient } from "@tanstack/react-query"
 import type { Hearth, LineageRow, ProphecyState } from "../../api/types"
 
 export interface HearthContext {
@@ -19,12 +17,11 @@ export interface HearthContext {
 export function HearthLayout() {
   const { hearthId } = useParams<{ hearthId: string }>()
   const navigate = useNavigate()
-  const qc = useQueryClient()
   const invalidate = useInvalidateRun()
   const { data: hearths } = useHearths()
   const { data: lineage } = useLineage(hearthId)
-  const { data: graphLib } = useGraphLibrary()
-  const running = useRunStore((s) => s.running && s.hearth === hearthId)
+  const liveRun = useRunStore((s) => (hearthId ? s.runs[hearthId] : undefined))
+  const running = !!liveRun
 
   const hearth = hearths?.find((h) => h.id === hearthId)
   const currentPid = lineage?.[lineage.length - 1]?.id
@@ -50,7 +47,8 @@ export function HearthLayout() {
         await api.resume(hearth.id)
         toast.success("resumed")
       } else {
-        useRunStore.getState().stop()
+        // /api/halt also stops any active runner server-side (see
+        // server.py) -- nothing to do here beyond the request itself.
         await api.halt(hearth.id)
         toast.success("halted")
       }
@@ -60,14 +58,17 @@ export function HearthLayout() {
     }
   }
 
-  const resumeDriving = () => {
-    if (!graphLib) return
+  const resumeDriving = async () => {
     const fr = state.frontier.filter(Boolean)
     if (!fr.length) {
       toast.info("this generation has nothing left in its frontier")
       return
     }
-    runAutoLoop(currentPid, hearth.id, graphLib.nodes, qc)
+    try {
+      await api.runsStart(hearth.id, currentPid, "approve")
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
   }
 
   const ctx: HearthContext = { hearth, lineage, pid: currentPid, state }
@@ -88,6 +89,11 @@ export function HearthLayout() {
               <StatusPill kind={hearthStatus(hearth.halted)} pulse={!hearth.halted}>
                 {hearth.halted ? "halted" : "active"}
               </StatusPill>
+              {running && (
+                <span className="font-mono text-[11.5px] font-normal text-ember2">
+                  {liveRun?.pendingApproval ? "waiting for your approval" : liveRun?.status}
+                </span>
+              )}
             </div>
             <div className="mt-1 text-[13.5px] text-ash italic">{hearth.ember}</div>
           </div>
@@ -98,6 +104,14 @@ export function HearthLayout() {
                 className="rounded-md bg-ember px-3.5 py-1.5 text-[13px] font-semibold text-[#1b1009] hover:bg-ember2"
               >
                 Resume driving
+              </button>
+            )}
+            {running && (
+              <button
+                onClick={() => api.runsStop(hearth.id).catch((e) => toast.error((e as Error).message))}
+                className="rounded-md border border-line2 px-3.5 py-1.5 text-[13px] text-ash hover:text-bone"
+              >
+                Stop driving
               </button>
             )}
             <button

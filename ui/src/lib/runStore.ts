@@ -3,88 +3,60 @@ import { create } from "zustand"
 export type RunMode = "autonomous" | "approve" | "step"
 
 export interface PendingApproval {
+  hearth: string
   pid: string
-  torch: string
   invocation: string
   offerable: string[]
 }
 
-export type ApprovalChoice =
-  | { action: "accept"; graph: string }
-  | { action: "reject" }
-
-// Tracks the ONE lineage this tab is actively auto-driving. Phase 1 keeps
-// the walk loop client-side (same as the old UI) -- the server-side
-// runner that lets a lineage keep going after the tab closes is Phase 2.
-// Until then, this store is what the Run Dock and the "a hearth is
-// building in the background" banners read from.
-//
-// runMode: approve gates runAutoLoop() right after kindle.next proposes
-// a sentence -- the loop sets pendingApproval and awaits approvalResolve
-// instead of immediately calling choosegraph+kindle, so "approve each
-// generation" is real, not just a label, even before the server-side
-// runner (Phase 2) exists.
-interface RunState {
-  pid: string | null
-  hearth: string | null
-  running: boolean
-  stopRequested: boolean
-  statusMessage: string
-  workingTorch: string | null
-  pendingInvocation: string | null
-  runMode: RunMode
+export interface LiveRun {
+  hearth: string
+  pid: string
+  mode: RunMode
+  status: string
   pendingApproval: PendingApproval | null
-  approvalResolve: ((choice: ApprovalChoice) => void) | null
-  start: (pid: string, hearth: string) => void
-  stop: () => void
-  setRunning: (running: boolean) => void
-  setStatus: (msg: string) => void
-  setWorking: (torch: string | null) => void
-  setPending: (invocation: string | null) => void
-  setPid: (pid: string) => void
-  setRunMode: (mode: RunMode) => void
-  requestApproval: (p: PendingApproval) => Promise<ApprovalChoice>
-  resolveApproval: (choice: ApprovalChoice) => void
-  clear: () => void
 }
 
-export const useRunStore = create<RunState>((set, get) => ({
-  pid: null,
-  hearth: null,
-  running: false,
-  stopRequested: false,
-  statusMessage: "",
-  workingTorch: null,
-  pendingInvocation: null,
-  runMode: "approve",
-  pendingApproval: null,
-  approvalResolve: null,
-  start: (pid, hearth) => set({ pid, hearth, running: true, stopRequested: false }),
-  stop: () => set({ stopRequested: true }),
-  setRunning: (running) => set({ running }),
-  setStatus: (statusMessage) => set({ statusMessage }),
-  setWorking: (workingTorch) => set({ workingTorch }),
-  setPending: (pendingInvocation) => set({ pendingInvocation }),
-  setPid: (pid) => set({ pid }),
-  setRunMode: (runMode) => set({ runMode }),
-  requestApproval: (p) =>
-    new Promise<ApprovalChoice>((resolve) => {
-      set({ pendingApproval: p, approvalResolve: resolve })
+// Phase 2: the engine lives on the server now (runner.py), so this store
+// no longer drives anything -- it's a pure reflection of what /api/events
+// (and the GET /api/runs snapshot taken on connect) says is happening,
+// shared by every tab. Multiple hearths can genuinely be running at once,
+// which the old single {pid, hearth, running} shape from Phase 1 had no
+// room for. Keyed by hearth id, since a hearth has at most one live
+// runner at a time (server.py's runner.start() refuses a second).
+interface RunState {
+  runs: Record<string, LiveRun>
+  connected: boolean
+  setConnected: (c: boolean) => void
+  upsert: (hearth: string, patch: Partial<LiveRun>) => void
+  remove: (hearth: string) => void
+  setSnapshot: (runs: LiveRun[]) => void
+}
+
+export const useRunStore = create<RunState>((set) => ({
+  runs: {},
+  connected: false,
+  setConnected: (connected) => set({ connected }),
+  upsert: (hearth, patch) =>
+    set((s) => {
+      const base: LiveRun = s.runs[hearth] ?? { hearth, pid: "", mode: "autonomous", status: "", pendingApproval: null }
+      return { runs: { ...s.runs, [hearth]: { ...base, ...patch } } }
     }),
-  resolveApproval: (choice) => {
-    get().approvalResolve?.(choice)
-    set({ pendingApproval: null, approvalResolve: null })
-  },
-  clear: () =>
-    set({
-      pid: null,
-      hearth: null,
-      running: false,
-      stopRequested: false,
-      statusMessage: "",
-      workingTorch: null,
-      pendingInvocation: null,
-      pendingApproval: null,
-      approvalResolve: null,
+  remove: (hearth) =>
+    set((s) => {
+      const runs = { ...s.runs }
+      delete runs[hearth]
+      return { runs }
     }),
+  setSnapshot: (runs) => set({ runs: Object.fromEntries(runs.map((r) => [r.hearth, r])) }),
 }))
+
+// the one pending approval to show, if any -- first-come, first-served
+// when more than one hearth happens to be waiting at once. A queue/stack
+// of approval dialogs is more than this needs right now.
+export function firstPendingApproval(runs: Record<string, LiveRun>): PendingApproval | null {
+  for (const r of Object.values(runs)) {
+    if (r.pendingApproval) return r.pendingApproval
+  }
+  return null
+}

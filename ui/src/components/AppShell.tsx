@@ -3,6 +3,8 @@ import { NavLink, Outlet } from "react-router-dom"
 import { Flame, LayoutDashboard, Library as LibraryIcon, Settings2 } from "lucide-react"
 import { useHearths } from "../api/hooks"
 import { useHealth } from "../api/health"
+import { useEventStream } from "../lib/useEventStream"
+import { useRunStore } from "../lib/runStore"
 import { CommandPalette } from "./CommandPalette"
 import { RunDock } from "./RunDock"
 import { Toaster } from "./Toast"
@@ -40,9 +42,10 @@ function Dot({ ok }: { ok: boolean | undefined }) {
 }
 
 export function AppShell() {
+  useEventStream()
   const { data: hearths } = useHearths()
   const { data: health } = useHealth()
-  const running = hearths?.filter((h) => !h.halted) ?? []
+  const liveCount = Object.keys(useRunStore((s) => s.runs)).length
 
   return (
     <div className="flex h-dvh bg-soot text-bone">
@@ -73,13 +76,13 @@ export function AppShell() {
               {health?.model ?? "..."}
             </span>
           </div>
-          {running.length > 0 && (
+          {liveCount > 0 && (
             <div className="flex justify-between gap-2">
               <span className="flex items-center gap-1.5">
                 <Dot ok={true} />
-                Active
+                Running
               </span>
-              <span className="font-mono">{running.length}</span>
+              <span className="font-mono">{liveCount}</span>
             </div>
           )}
         </div>

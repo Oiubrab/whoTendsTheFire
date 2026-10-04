@@ -56,4 +56,11 @@ export const api = {
   halt: (hearth: string) => post<{ halted: boolean }>("/api/halt", { hearth }),
   resume: (hearth: string) => post<{ halted: boolean }>("/api/resume", { hearth }),
   label: (hearth: string, label: string) => post<{ label: string }>("/api/label", { hearth, label }),
+
+  runsList: () => get<import("./types").ServerRunStatus[]>("/api/runs"),
+  runsStart: (hearth: string, pid: string, mode: string) =>
+    post<{ started: boolean }>("/api/runs/start", { hearth, pid, mode }),
+  runsStop: (hearth: string) => post<{ stopped: boolean }>("/api/runs/stop", { hearth }),
+  runsApprove: (hearth: string, action: "accept" | "reject", graph?: string) =>
+    post<{ ok: boolean }>("/api/runs/approve", { hearth, action, graph }),
 }

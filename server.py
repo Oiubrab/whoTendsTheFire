@@ -9,6 +9,7 @@ running one expression, and persisting the result back to db/.
 import http.server
 import json
 import os
+import queue
 import secrets
 import socketserver
 import subprocess
@@ -17,6 +18,8 @@ import re
 import time
 import urllib.parse
 import urllib.request
+
+import runner
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 Q_SCRIPT = os.path.join(REPO, "q", "torches.q")
@@ -533,6 +536,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if os.path.exists(os.path.join(dp, f))
                     ) if os.path.isdir(RUNS_DIR) else 0,
                 })
+            elif parsed.path == "/api/runs":
+                # every hearth with a background runner actively driving it
+                # (or with a pending approval, which is a runner that is
+                # alive in every sense but threading.Thread.is_alive()) --
+                # lets the UI know what's running on page load, before any
+                # SSE event has arrived to tell it.
+                self._send_json(runner.active_runs())
+            elif parsed.path == "/api/events":
+                # server-sent events: the live feed a Phase-1 client-side
+                # loop never had anything like. One long-lived response per
+                # subscriber; daemon_threads=True on Server is what lets the
+                # process still exit with one of these connections open.
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                q = runner.subscribe()
+                try:
+                    self.wfile.write(b": connected\n\n")
+                    self.wfile.flush()
+                    while True:
+                        try:
+                            ev = q.get(timeout=15)
+                            self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
+                        except queue.Empty:
+                            # a bare comment line -- SSE keepalive, never
+                            # delivered to the client's onmessage handler,
+                            # just enough traffic that an idle proxy or
+                            # browser doesn't decide the connection is dead
+                            self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                finally:
+                    runner.unsubscribe(q)
+                return
             elif parsed.path == "/api/blocked":
                 qs = urllib.parse.parse_qs(parsed.query)
                 pid = qs["pid"][0]
@@ -787,11 +827,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif parsed.path == "/api/halt":
                 hid = body["hearth"]
                 run_q(f"halthearth[{qsym(hid)}]; res: 1b")
+                # kindle[] already refuses a halted hearth on its own (via
+                # maykindle[]), so this is purely about not making a runner
+                # wait for its next kindle attempt to notice -- stop it now.
+                runner.stop(hid)
                 self._send_json({"halted": True})
             elif parsed.path == "/api/resume":
                 hid = body["hearth"]
                 run_q(f"resumehearth[{qsym(hid)}]; res: 1b")
                 self._send_json({"halted": False})
+            elif parsed.path == "/api/runs/start":
+                # the server-side runner itself, not a request IT makes --
+                # this kicks off a background thread and returns immediately;
+                # progress arrives over /api/events from here on.
+                hid, pid, mode = body["hearth"], body["pid"], body.get("mode", "approve")
+                bridge = f"http://127.0.0.1:{self.server.server_address[1]}"
+                try:
+                    runner.start(hid, pid, mode, bridge)
+                    self._send_json({"started": True})
+                except RuntimeError as e:
+                    self._send_json({"error": str(e)}, 409)
+            elif parsed.path == "/api/runs/stop":
+                ok = runner.stop(body["hearth"])
+                self._send_json({"stopped": ok})
+            elif parsed.path == "/api/runs/approve":
+                try:
+                    runner.approve(body["hearth"], body["action"], body.get("graph"))
+                    self._send_json({"ok": True})
+                except RuntimeError as e:
+                    self._send_json({"error": str(e)}, 409)
             elif parsed.path == "/api/label":
                 hid, txt = body["hearth"], body.get("label", "")
                 run_q(f"setlabel[{qsym(hid)};{qstr(txt)}]; res: 1b")
@@ -918,6 +982,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
+    # an /api/events SSE connection blocks its thread for as long as the
+    # browser tab stays open -- without this the process won't exit on
+    # SIGTERM/Ctrl-C while one is still connected, it'll hang waiting for
+    # a thread that's waiting for a client that's never coming back.
+    daemon_threads = True
 
 
 def main():

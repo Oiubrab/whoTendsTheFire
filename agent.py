@@ -341,18 +341,36 @@ def receipt(pid: str) -> None:
             print(f"       {label}: could not run ({e})")
 
 
-def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str | None, str]:
+def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_event=None, should_stop=None) -> tuple[str | None, str | None, str]:
     """Walk one prophecy to completion.
 
     Returns (next_graph, next_invocation, reason). next_invocation is None
     when no daughter should be spawned; next_graph is which arrangement the
     daughter walks, chosen at the kindling torch rather than fixed for the
     whole lineage. reason explains why the walk ended.
+
+    approve_kindle(invocation, offerable) -> (accepted, graph), when given,
+    is consulted the moment kindle.next proposes a sentence, before this
+    writes `written` and before choose.graph is ever reached -- the CLI's
+    own unattended runs never pass this (None preserves exactly the old
+    behavior: always proceed, let choose_graph classify it), but the
+    server-side runner's "approve each generation" mode uses it to block
+    here until a person decides, instead of kindling blind. on_event(dict),
+    when given, is called after every successful light -- the runner's only
+    hook into this walk for the UI's live event stream; this function stays
+    unaware of HTTP, SSE or any of that. should_stop(), when given, is
+    checked before every single torch -- a Halt click has to land within
+    one step, not wait out the rest of a 45-step generation (each step is
+    a real model call with a real model, so that wait is real minutes, not
+    an abstraction).
     """
     next_invocation = None
     next_graph = None
+    approved_graph = None
     seen = {}
     for step in range(1, MAX_STEPS_PER_PROPHECY + 1):
+        if should_stop is not None and should_stop():
+            return next_graph, next_invocation, f"stopped after {step - 1} step(s)"
         state = http_json(f"{BRIDGE}/api/state?pid={pid}")
         frontier = [t for t in state["frontier"] if t]
         if not frontier:
@@ -400,7 +418,16 @@ def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str | N
                 else:
                     print("      no usable mutations proposed")
             next_invocation = propose_kindling(brief, torch, ember)
-            option = "written" if next_invocation else "decline"
+            if next_invocation and approve_kindle is not None:
+                accepted, chosen = approve_kindle(next_invocation, state.get("offerable") or [])
+                if accepted:
+                    approved_graph = chosen
+                    option = "written"
+                else:
+                    next_invocation = None
+                    option = "decline"
+            else:
+                option = "written" if next_invocation else "decline"
             if next_invocation:
                 print(f"      proposes building: {next_invocation}")
             else:
@@ -409,7 +436,10 @@ def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str | N
             # reached only after kindle.next wrote `written`, so
             # next_invocation is always set here -- the decline edge goes
             # straight to the terminal and never reaches this torch.
-            next_graph = choose_graph(brief, torch, next_invocation, state.get("offerable"))
+            # approved_graph, when set, is a person's decision from
+            # approve_kindle above and is used as-is, with no model call
+            # asking it to reclassify a sentence a human already matched.
+            next_graph = approved_graph or choose_graph(brief, torch, next_invocation, state.get("offerable"))
             option = next_graph
             print(f"      fits: {next_graph}")
         else:
@@ -425,6 +455,11 @@ def run_prophecy(pid: str, by_id: dict, ember: str) -> tuple[str | None, str | N
             print(f"      check ran, outcome: {res['option']!r}")
         if res["filesWritten"]:
             print(f"      {res['filesWritten']} file(s) written")
+        if on_event:
+            on_event({
+                "torch": torch_id, "kind": torch["kind"], "option": res["option"],
+                "filesWritten": res["filesWritten"],
+            })
 
     return next_graph, next_invocation, f"hit the {MAX_STEPS_PER_PROPHECY}-step ceiling"
 
