@@ -430,6 +430,19 @@ chronicle: ([] prophecy:`symbol$(); seq:`long$(); torch:`symbol$(); option:`symb
 / from outside, to a model that is bad at the task; it was neither.
 laststatus: ([prophecy:`symbol$()] torch:`symbol$(); option:`symbol$(); output:())
 
+/ why a prophecy's walk actually ended -- "declined", "stuck: X
+/ repeated 4 times", "hit the 45-step ceiling", "error: ...". Phase 3:
+/ the Overview tab used to guess this from lastcheck (a validation
+/ failure looks the same from outside as a clean decline), which was
+/ right only by coincidence. Set by the runner (server-side) and by the
+/ CLI's own main() loop, both via setendreason -- never inferred here.
+endreason: ([prophecy:`symbol$()] reason:(); ts:`timestamp$())
+setendreason: {[pid;txt] `endreason upsert (pid;txt;.z.p); }
+/ not @[f;pid;""] -- see hearthlabel's own comment for why that pattern
+/ silently fails for an untyped mixed column: first on an empty result
+/ is q's generic null, not a thrown error, so the fallback never fires.
+getendreason: {[pid] r: exec reason from endreason where prophecy=pid; $[0=count r; ""; first r]}
+
 / declared, not inferred. Inferring "no inbound edge" meant a mutation
 / that orphaned a torch silently promoted it to an entry point -- the
 / first race here rewired kindle.next's only inbound edge away and the
@@ -521,10 +534,10 @@ state: {[pid]
   p: prophecies[pid];
   h: hearths[p`hearth];
   trail: 0!select seq,torch,option from chronicle where prophecy=pid;
-  `invocation`ember`dest`graph`hearth`parent`generation`frontier`trail`capabilities`offerable`tree`lastcheck`halted!
+  `invocation`ember`dest`graph`hearth`parent`generation`frontier`trail`capabilities`offerable`tree`lastcheck`halted`endreason!
     (p`invocation; h`ember; p`dest; p`graph; p`hearth; p`parent; p`generation;
      p`frontier; trail; capabilities[pid]; offerable[pid]; tree p`dest;
-     lastcheck[pid]; hearthhalted p`hearth) }
+     lastcheck[pid]; hearthhalted p`hearth; getendreason pid) }
 
 logchoice: {[pid;tid;opt]
   seq: 1 + max (0j, exec seq from chronicle where prophecy=pid);
@@ -971,17 +984,20 @@ savedb: {[]
   (hsym `$DBDIR,"/prophecies") set prophecies;
   (hsym `$DBDIR,"/chronicle") set chronicle;
   (hsym `$DBDIR,"/laststatus") set laststatus;
-  (hsym `$DBDIR,"/hearthmeta") set hearthmeta; }
+  (hsym `$DBDIR,"/hearthmeta") set hearthmeta;
+  (hsym `$DBDIR,"/endreason") set endreason; }
 
 loaddb: {[]
   hearths::get hsym `$DBDIR,"/hearths";
   prophecies::get hsym `$DBDIR,"/prophecies";
   chronicle::get hsym `$DBDIR,"/chronicle";
-  / guarded: a db/ written before laststatus (or hearthmeta) existed has
-  / no file for it. Falling back to the fresh empty table declared above,
-  / rather than letting a missing file crash every single boot of an
-  / existing hearth.
+  / guarded: a db/ written before laststatus (or hearthmeta, or
+  / endreason) existed has no file for it. Falling back to the fresh
+  / empty table declared above, rather than letting a missing file
+  / crash every single boot of an existing hearth.
   laststatus::@[{get hsym `$DBDIR,"/laststatus"}; ::;
     {([prophecy:`symbol$()] torch:`symbol$(); option:`symbol$(); output:())}];
   hearthmeta::@[{get hsym `$DBDIR,"/hearthmeta"}; ::;
-    {([hearth:`symbol$()] label:())}]; }
+    {([hearth:`symbol$()] label:())}];
+  endreason::@[{get hsym `$DBDIR,"/endreason"}; ::;
+    {([prophecy:`symbol$()] reason:(); ts:`timestamp$())}]; }

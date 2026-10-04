@@ -19,6 +19,7 @@ import time
 import urllib.parse
 import urllib.request
 
+import calllog
 import runner
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -419,9 +420,15 @@ def resolve_target(target, tid, st):
     return target.replace("{nn}", "%03d" % gen).replace("{n}", str(gen))
 
 
-def ask_model(prompt, num_predict=6000, effort=None, target=None, torch=None):
+def ask_model(prompt, num_predict=6000, effort=None, target=None, torch=None, pid=None):
+    # pid, when given, logs the call to calllog for the Activity tab's
+    # inspector -- see agent.py's matching ask_model for why this is the
+    # only thing either copy needs to know about a pid at all.
+    label = torch or target
     if FAKE_MODEL:
-        return fake_answer(prompt, target, torch)
+        reply = fake_answer(prompt, target, torch)
+        calllog.record(pid, label, prompt, reply, 0, None, None, MODEL, True)
+        return reply
     """effort="low" cuts gpt-oss's analysis-channel reasoning, which is
     ~30% of wall clock on mechanical tasks (measured: 120s -> 84s) and
     buys nothing when the job is 'write four shell commands'."""
@@ -440,8 +447,15 @@ def ask_model(prompt, num_predict=6000, effort=None, target=None, torch=None):
     payload = json.dumps(body).encode()
     req = urllib.request.Request(f"{OLLAMA}/api/generate", data=payload,
                                  headers={"Content-Type": "application/json"})
+    started = time.monotonic()
     with urllib.request.urlopen(req, timeout=900) as r:
-        return _extract(json.loads(r.read()).get("response", ""))
+        res = json.loads(r.read())
+    text = _extract(res.get("response", ""))
+    calllog.record(
+        pid, label, prompt, text, round((time.monotonic() - started) * 1000),
+        res.get("prompt_eval_count"), res.get("eval_count"), MODEL, False,
+    )
+    return text
 
 
 def strip_fence(text):
@@ -536,6 +550,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if os.path.exists(os.path.join(dp, f))
                     ) if os.path.isdir(RUNS_DIR) else 0,
                 })
+            elif parsed.path == "/api/calls":
+                qs = urllib.parse.parse_qs(parsed.query)
+                self._send_json(calllog.for_pid(qs["pid"][0]))
             elif parsed.path == "/api/runs":
                 # every hearth with a background runner actively driving it
                 # (or with a pending approval, which is a runner that is
@@ -727,7 +744,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                               + (f"Its question: {t['rite']}\n" if t["rite"] else "")
                               + "Choose exactly one of these and reply with ONLY that text:\n"
                               + ", ".join(opts) + "\n\nOption:")
-                    reply = ask_model(prompt, num_predict=600, torch=tid) or ""
+                    reply = ask_model(prompt, num_predict=600, torch=tid, pid=pid) or ""
                     pick = next((o for o in opts if o.lower() in reply.lower()), opts[0])
                     self._send_json({"option": pick, "asked": True, "said": reply[:200]})
             elif parsed.path == "/api/propose":
@@ -749,7 +766,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     f"{brief}\n\nTHE EMBER (what this lineage serves):\n  {st['ember']}\n\n"
                     f"{rite}\n"
                 )
-                reply = ask_model(prompt, num_predict=400, torch=tid)
+                reply = ask_model(prompt, num_predict=400, torch=tid, pid=pid)
                 if not reply:
                     self._send_json({"decline": True})
                 else:
@@ -785,7 +802,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "Reply with ONLY one of these exact option names, nothing else:\n"
                     + ", ".join(options) + "\n\nOption:"
                 )
-                reply = ask_model(prompt, num_predict=200, torch=tid) or ""
+                reply = ask_model(prompt, num_predict=200, torch=tid, pid=pid) or ""
                 pick = next((o for o in sorted(options, key=len, reverse=True) if o in reply), options[0])
                 self._send_json({"option": pick, "asked": True, "said": reply[:200]})
             elif parsed.path == "/api/authorize":
@@ -807,7 +824,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 effort = "low" if target.endswith(".sh") else None
                 code = None
                 for budget in (4000, 9000):
-                    reply = ask_model(prompt, num_predict=budget, effort=effort, target=target)
+                    reply = ask_model(prompt, num_predict=budget, effort=effort, target=target, pid=pid)
                     if not reply:
                         continue
                     cand = strip_fence(reply).strip() + "\n"
@@ -836,6 +853,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 hid = body["hearth"]
                 run_q(f"resumehearth[{qsym(hid)}]; res: 1b")
                 self._send_json({"halted": False})
+            elif parsed.path == "/api/endreason":
+                # set by runner.py (the server-side runner) and by
+                # agent.py's own CLI loop, right after run_prophecy()
+                # returns -- never inferred from laststatus, which looks
+                # the same for a clean decline as for a validation that
+                # happened to fail last.
+                pid, reason = body["pid"], body["reason"]
+                run_q(f"setendreason[{qsym(pid)};{qstr(reason)}]; res: 1b")
+                self._send_json({"ok": True})
             elif parsed.path == "/api/runs/start":
                 # the server-side runner itself, not a request IT makes --
                 # this kicks off a background thread and returns immediately;

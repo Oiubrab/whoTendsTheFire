@@ -18,8 +18,11 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+
+import calllog
 
 BRIDGE = "http://127.0.0.1:8420"
 OLLAMA = "http://localhost:11434"
@@ -127,10 +130,19 @@ def fake_reply(prompt: str, torch: str | None = None) -> str:
 
 
 def ask_model(prompt: str, num_predict: int = 600,
-              torch: str | None = None) -> str | None:
-    """Call the local model. None means it produced nothing usable."""
+              torch: str | None = None, pid: str | None = None) -> str | None:
+    """Call the local model. None means it produced nothing usable.
+
+    pid, when given, logs the call (prompt, reply, timing, token counts)
+    to calllog for the Activity tab's inspector -- the only reason this
+    function needs to know what a pid is. Every existing call site that
+    doesn't pass one (there were none before Phase 3) keeps logging off.
+    """
     if FAKE_MODEL:
-        return fake_reply(prompt, torch)
+        reply = fake_reply(prompt, torch)
+        calllog.record(pid, torch, prompt, reply, 0, None, None, MODEL, True)
+        return reply
+    started = time.monotonic()
     for budget in (num_predict, num_predict * 3):
         res = http_json(f"{OLLAMA}/api/generate", {
             "model": MODEL,
@@ -141,12 +153,17 @@ def ask_model(prompt: str, num_predict: int = 600,
         })
         text = _extract(res.get("response", ""))
         if text is not None:
+            calllog.record(
+                pid, torch, prompt, text, round((time.monotonic() - started) * 1000),
+                res.get("prompt_eval_count"), res.get("eval_count"), MODEL, False,
+            )
             return text
         # ran out of budget mid-reasoning; give it more room once
+    calllog.record(pid, torch, prompt, None, round((time.monotonic() - started) * 1000), None, None, MODEL, False)
     return None
 
 
-def choose_option(brief_text: str, torch: dict) -> str:
+def choose_option(brief_text: str, torch: dict, pid: str | None = None) -> str:
     options = torch["options"]
     if len(options) == 1:
         return options[0]
@@ -162,7 +179,7 @@ def choose_option(brief_text: str, torch: dict) -> str:
         + ", ".join(options)
         + "\n\nOption:"
     )
-    reply = ask_model(prompt, torch=torch["id"])
+    reply = ask_model(prompt, torch=torch["id"], pid=pid)
     if reply is None:
         print(f"      (no usable reply -- defaulting to {options[0]!r})")
         return options[0]
@@ -174,7 +191,7 @@ def choose_option(brief_text: str, torch: dict) -> str:
     return options[0]
 
 
-def propose_kindling(brief_text: str, torch: dict, ember: str) -> str | None:
+def propose_kindling(brief_text: str, torch: dict, ember: str, pid: str | None = None) -> str | None:
     """Ask the model for the daughter's invocation -- what to build, not
     how. Returns None to decline.
 
@@ -192,7 +209,7 @@ def propose_kindling(brief_text: str, torch: dict, ember: str) -> str | None:
         f"THE EMBER (what this whole lineage ultimately serves):\n  {ember}\n\n"
         f"{torch['rite']}\n"
     )
-    reply = ask_model(prompt, num_predict=400, torch=torch["id"])
+    reply = ask_model(prompt, num_predict=400, torch=torch["id"], pid=pid)
     if reply is None:
         return None  # unusable output is a decline, not a guess
     line = next((l.strip() for l in reply.splitlines() if l.strip()), "")
@@ -204,7 +221,7 @@ def propose_kindling(brief_text: str, torch: dict, ember: str) -> str | None:
     return invocation
 
 
-def choose_graph(brief_text: str, torch: dict, invocation: str, offerable=None) -> str:
+def choose_graph(brief_text: str, torch: dict, invocation: str, offerable=None, pid: str | None = None) -> str:
     """Which arrangement fits the invocation propose_kindling already wrote.
 
     A plain decision: the menu IS the torch's own options, which are the
@@ -230,7 +247,7 @@ def choose_graph(brief_text: str, torch: dict, invocation: str, offerable=None) 
         "Reply with ONLY one of these exact option names, nothing else:\n"
         + ", ".join(options) + "\n\nOption:"
     )
-    reply = ask_model(prompt, num_predict=200, torch=torch["id"])
+    reply = ask_model(prompt, num_predict=200, torch=torch["id"], pid=pid)
     if reply is None:
         print(f"      (no usable reply -- defaulting to {options[0]!r})")
         return options[0]
@@ -417,7 +434,7 @@ def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_even
                             print(f"        variant {row['variant']} ({row['op']}): {row['score']}  {row['detail']}{mark}")
                 else:
                     print("      no usable mutations proposed")
-            next_invocation = propose_kindling(brief, torch, ember)
+            next_invocation = propose_kindling(brief, torch, ember, pid=pid)
             if next_invocation and approve_kindle is not None:
                 accepted, chosen = approve_kindle(next_invocation, state.get("offerable") or [])
                 if accepted:
@@ -439,11 +456,11 @@ def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_even
             # approved_graph, when set, is a person's decision from
             # approve_kindle above and is used as-is, with no model call
             # asking it to reclassify a sentence a human already matched.
-            next_graph = approved_graph or choose_graph(brief, torch, next_invocation, state.get("offerable"))
+            next_graph = approved_graph or choose_graph(brief, torch, next_invocation, state.get("offerable"), pid=pid)
             option = next_graph
             print(f"      fits: {next_graph}")
         else:
-            option = choose_option(brief, torch)
+            option = choose_option(brief, torch, pid=pid)
             if torch["kind"] != "validation":
                 print(f"      chose {option!r}")
 
@@ -504,6 +521,7 @@ def main():
 
         next_graph, next_invocation, reason = run_prophecy(pid, by_id, ember)
         print(f"    prophecy ended ({reason})")
+        http_json(f"{BRIDGE}/api/endreason", {"pid": pid, "reason": reason})
         receipt(pid)
 
         if not next_invocation:

@@ -40,6 +40,7 @@ export const api = {
   file: (pid: string) => get<FileListing>(`/api/file?pid=${encodeURIComponent(pid)}`),
   blocked: (pid: string) => get<BlockedRow[]>(`/api/blocked?pid=${encodeURIComponent(pid)}`),
   quarantined: (pid: string) => get<{ files: Record<string, string> }>(`/api/quarantined?pid=${encodeURIComponent(pid)}`),
+  calls: (pid: string) => get<import("./types").CallLogEntry[]>(`/api/calls?pid=${encodeURIComponent(pid)}`),
   gitlog: (pid: string) => get<{ commits: { hash: string; date: string; subject: string }[] }>(`/api/gitlog?pid=${encodeURIComponent(pid)}`),
   gitshow: (pid: string, hash: string) => get<{ diff: string }>(`/api/gitshow?pid=${encodeURIComponent(pid)}&hash=${encodeURIComponent(hash)}`),
 

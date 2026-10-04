@@ -43,6 +43,7 @@ export function useEventStream() {
       if (pid) {
         qc.invalidateQueries({ queryKey: ["state", pid] })
         qc.invalidateQueries({ queryKey: ["files", pid] })
+        qc.invalidateQueries({ queryKey: ["calls", pid] })
       }
     }
 

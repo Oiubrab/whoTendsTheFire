@@ -9,6 +9,14 @@ export default function Overview() {
   const frontierOpen = state.frontier.filter(Boolean).length > 0
   const lastCheckFailed = state.lastcheck.torch && state.lastcheck.option === "fail"
 
+  const lastTrail = state.trail[state.trail.length - 1]
+  const declined = lastTrail?.torch === "kindle.next" && lastTrail?.option === "decline"
+  const reason = state.endreason
+  const erroredOut = reason.startsWith("error:")
+  const stuck = reason.startsWith("stuck:")
+  const ceiling = reason.includes("step ceiling")
+  const stoppedByUser = reason.startsWith("stopped after")
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-6">
       {(hearth.halted || !frontierOpen) && (
@@ -18,9 +26,17 @@ export default function Overview() {
             <h3 className="text-[14.5px] font-semibold text-bone">
               {lastCheckFailed
                 ? `Stopped at generation ${hearth.generations}: a check failed`
-                : hearth.halted
-                  ? `Halted at generation ${hearth.generations}`
-                  : `This generation's walk has nothing left to do`}
+                : erroredOut
+                  ? `Stopped at generation ${hearth.generations}: an error`
+                  : stuck
+                    ? `Stopped at generation ${hearth.generations}: a repair loop didn't converge`
+                    : ceiling
+                      ? `Stopped at generation ${hearth.generations}: hit the step ceiling`
+                      : hearth.halted
+                        ? `Halted at generation ${hearth.generations}`
+                        : declined
+                          ? `Lineage ends: nothing further proposed`
+                          : `This generation's walk has nothing left to do`}
             </h3>
             {lastCheckFailed ? (
               <>
@@ -39,14 +55,22 @@ export default function Overview() {
                   </button>
                 )}
               </>
+            ) : erroredOut || stuck || ceiling ? (
+              <div className="mt-1 font-mono text-[12.5px] text-ash">{reason}</div>
             ) : hearth.halted ? (
               <div className="mt-1 text-[13px] text-ash">
+                {stoppedByUser ? "You stopped it mid-generation. " : ""}
                 You halted this hearth. Resume from the header above to let it keep kindling.
+              </div>
+            ) : declined ? (
+              <div className="mt-1 text-[13px] text-ash">
+                The model was asked what to build next and declined -- it judged nothing further worth doing,
+                given what already exists.
               </div>
             ) : (
               <div className="mt-1 text-[13px] text-ash">
-                No torch in the frontier can light. This can mean the model declined to propose anything further,
-                or this walk reached a genuine dead end in its graph.
+                No torch in the frontier can light, and this generation predates end-reason tracking, so the exact
+                cause wasn't recorded.
               </div>
             )}
           </div>

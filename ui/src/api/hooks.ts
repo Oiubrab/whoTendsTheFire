@@ -54,6 +54,15 @@ export function useQuarantined(pid: string | undefined) {
   return useQuery({ queryKey: ["quarantined", pid], queryFn: () => api.quarantined(pid!), enabled: !!pid })
 }
 
+export function useCalls(pid: string | undefined, opts?: { poll?: boolean }) {
+  return useQuery({
+    queryKey: ["calls", pid],
+    queryFn: () => api.calls(pid!),
+    enabled: !!pid,
+    refetchInterval: opts?.poll ? STATE_POLL_MS : false,
+  })
+}
+
 // a bundle of invalidations every mutation that changes run state needs,
 // so each call site doesn't have to remember the whole list
 export function useInvalidateRun() {

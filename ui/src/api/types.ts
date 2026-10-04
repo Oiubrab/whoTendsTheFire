@@ -68,6 +68,18 @@ export interface LastCheck {
   output: string
 }
 
+export interface CallLogEntry {
+  torch: string | null
+  prompt: string
+  reply: string
+  durationMs: number
+  promptTokens: number | null
+  replyTokens: number | null
+  model: string
+  fake: boolean
+  ts: number
+}
+
 export interface ProphecyState {
   invocation: string
   ember: string
@@ -83,6 +95,11 @@ export interface ProphecyState {
   tree: string[]
   lastcheck: LastCheck
   halted: boolean
+  // lowercase -- matches q's own symbol name verbatim through .j.j,
+  // unlike every other field here which happens to already be lowercase
+  // for the same reason. Empty string, never null, when nothing has
+  // ended yet (see getendreason[] in q/torches.q).
+  endreason: string
 }
 
 export interface BlockedRow {

@@ -152,6 +152,10 @@ def _drive(runner: LineageRunner) -> None:
                 on_event=on_event,
                 should_stop=runner.stop_event.is_set,
             )
+            try:
+                agent.http_json(f"{agent.BRIDGE}/api/endreason", {"pid": runner.pid, "reason": reason})
+            except Exception:  # noqa: BLE001 -- the Overview tab falling back to a guess beats a dead runner
+                pass
             broadcast({"type": "generation_end", "hearth": hearth, "pid": runner.pid, "reason": reason})
 
             if runner.stop_event.is_set():
