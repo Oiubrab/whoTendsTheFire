@@ -60,15 +60,28 @@ export function usePanZoom(svgRef: React.RefObject<SVGSVGElement | null>) {
       startY = ev.clientY
       startViewX = viewRef.current.x
       startViewY = viewRef.current.y
-      svg.setPointerCapture(ev.pointerId)
-      svg.classList.add("panning")
+      // setPointerCapture is NOT called here. Calling it unconditionally
+      // on every pointerdown -- even a plain click with zero movement --
+      // redirects the pointerup/mouseup/click that follows to whichever
+      // element called it (this svg), rather than whatever the cursor
+      // actually landed on. A click on a torch's nested <g> then never
+      // reaches that element at all: the native click's target becomes
+      // an ANCESTOR of it, and React's synthetic dispatch only walks the
+      // real target's own ancestor chain, which does not include a
+      // sibling node's onClick. Capture is requested lazily instead, the
+      // moment a real drag is detected below -- a plain click never
+      // triggers it, so the click lands on the node exactly as clicked.
     }
 
     const onPointerMove = (ev: PointerEvent) => {
       if (!dragging) return
       const dx = ev.clientX - startX
       const dy = ev.clientY - startY
-      if (!dragged && Math.hypot(dx, dy) > 3) dragged = true
+      if (!dragged && Math.hypot(dx, dy) > 3) {
+        dragged = true
+        svg.setPointerCapture(ev.pointerId)
+        svg.classList.add("panning")
+      }
       if (dragged) setView((v) => ({ ...v, x: startViewX + dx, y: startViewY + dy }))
     }
 
