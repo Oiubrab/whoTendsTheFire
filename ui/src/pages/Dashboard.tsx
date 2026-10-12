@@ -21,13 +21,43 @@ const MODES: { id: RunMode; label: string; help: string }[] = [
   { id: "step", label: "Step by step", help: "You drive every torch by hand from the Graph tab" },
 ]
 
+// Which mode is remembered as the default for the NEXT hearth you light,
+// not just this one -- "approve" used to be hardcoded, which is why the
+// popup kept showing up every generation even after picking Autonomous
+// once. A plain default would only have fixed that for whoever edited
+// the source; this makes the choice itself sticky across reloads/visits.
+const MODE_KEY = "whoTendsTheFire.defaultRunMode"
+
+function loadDefaultMode(): RunMode {
+  try {
+    const saved = localStorage.getItem(MODE_KEY)
+    if (saved === "autonomous" || saved === "approve" || saved === "step") return saved
+  } catch {
+    // private browsing / storage disabled -- fall through to the default
+  }
+  return "autonomous"
+}
+
+function saveDefaultMode(mode: RunMode) {
+  try {
+    localStorage.setItem(MODE_KEY, mode)
+  } catch {
+    // nothing to do if storage isn't available; the picker still works
+    // for this visit, it just won't be remembered next time
+  }
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { data: hearths } = useHearths()
   const liveRuns = useRunStore((s) => s.runs)
   const [invocation, setInvocation] = useState("")
-  const [mode, setMode] = useState<RunMode>("approve")
+  const [mode, setModeState] = useState<RunMode>(loadDefaultMode)
+  const setMode = (m: RunMode) => {
+    setModeState(m)
+    saveDefaultMode(m)
+  }
   const [maxGens, setMaxGens] = useState("")
   const [diskCap, setDiskCap] = useState("")
   const [starting, setStarting] = useState(false)
