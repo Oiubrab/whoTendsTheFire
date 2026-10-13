@@ -15,6 +15,7 @@ import socketserver
 import subprocess
 import sys
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -83,6 +84,11 @@ def qsym(s: str) -> str:
     return "`$" + qstr(s)
 
 
+_WRITE_LOCK = threading.Lock()
+_NO_LOCK = __import__('contextlib').nullcontext()
+_TLS = threading.local()
+
+
 def run_q(expr: str, timeout: int = 30):
     """Run q statements against the persisted graph; expr must end by setting `res`
     (e.g. "res: 1+1" or "foo[]; res: state[...]") -- `res::X; Y` are two separate
@@ -97,15 +103,26 @@ def run_q(expr: str, timeout: int = 30):
     # found an empty hearths table. db/hearths is what runtime state now
     # writes, so it is what this has to check instead.
     boot = "loaddb[]" if os.path.exists(os.path.join(DB_DIR, "hearths")) else "savedb[]"
-    script = f"{boot};\n{expr};\n-1 .j.j res;\nsavedb[];\nexit 0\n"
-    proc = subprocess.run(
-        ["q", Q_SCRIPT, "-q"],
-        input=script,
-        capture_output=True,
-        text=True,
-        cwd=REPO,
-        timeout=timeout,
-    )
+    # Every call is its own q process doing loaddb -> expr -> savedb, so two
+    # overlapping calls that both save are a lost update: the one that loaded
+    # first and saved last overwrites the other's write with a stale copy.
+    # Once Phase 2 put a runner writing in the background while the UI polls,
+    # this silently dropped a freshly kindled generation from a real lineage
+    # (and chronicle rows in a reproduction). Reads (every GET) no longer save
+    # and take no lock; every write is serialized behind _WRITE_LOCK.
+    readonly = getattr(_TLS, "readonly", False)
+    save = "" if readonly else "savedb[];\n"
+    script = f"{boot};\n{expr};\n-1 .j.j res;\n{save}exit 0\n"
+    lock = _NO_LOCK if readonly else _WRITE_LOCK
+    with lock:
+        proc = subprocess.run(
+            ["q", Q_SCRIPT, "-q"],
+            input=script,
+            capture_output=True,
+            text=True,
+            cwd=REPO,
+            timeout=timeout,
+        )
     out = proc.stdout.strip()
     if not out:
         raise RuntimeError(f"q produced no output.\nstderr: {proc.stderr}\nscript:\n{script}")
@@ -498,6 +515,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return json.loads(raw or b"{}")
 
     def do_GET(self):
+        # threads are reused per connection, so set it either way
+        _TLS.readonly = True
         parsed = urllib.parse.urlparse(self.path)
         try:
             if parsed.path.startswith("/assets/") or parsed.path in ("/favicon.svg",):
@@ -675,6 +694,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": str(e)}, 500)
 
     def do_POST(self):
+        _TLS.readonly = False
         parsed = urllib.parse.urlparse(self.path)
         try:
             body = self._read_json_body()
