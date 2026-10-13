@@ -11,6 +11,9 @@ export default function Overview() {
 
   const lastTrail = state.trail[state.trail.length - 1]
   const declined = lastTrail?.torch === "kindle.next" && lastTrail?.option === "decline"
+  // choose.graph lit means a daughter was chosen -- yet this is still the
+  // newest prophecy, so the next generation was never created (or was lost)
+  const orphaned = lastTrail?.torch === "choose.graph"
   const reason = state.endreason
   const erroredOut = reason.startsWith("error:")
   const stuck = reason.startsWith("stuck:")
@@ -36,7 +39,9 @@ export default function Overview() {
                         ? `Halted at generation ${hearth.generations}`
                         : declined
                           ? `Lineage ends: nothing further proposed`
-                          : `This generation's walk has nothing left to do`}
+                          : orphaned
+                            ? `Generation ${hearth.generations} chose its successor, but it was never created`
+                            : `This generation's walk has nothing left to do`}
             </h3>
             {lastCheckFailed ? (
               <>
@@ -67,10 +72,14 @@ export default function Overview() {
                 The model was asked what to build next and declined -- it judged nothing further worth doing,
                 given what already exists.
               </div>
+            ) : orphaned ? (
+              <div className="mt-1 text-[13px] text-ash">
+                It picked <span className="font-mono text-[12px] text-ember2">{lastTrail?.option}</span> for the next
+                generation, but no next generation exists. The kindle itself failed or was lost.
+              </div>
             ) : (
               <div className="mt-1 text-[13px] text-ash">
-                No torch in the frontier can light, and this generation predates end-reason tracking, so the exact
-                cause wasn't recorded.
+                No torch in the frontier can light.{reason ? ` Recorded reason: ${reason}.` : ""}
               </div>
             )}
           </div>
