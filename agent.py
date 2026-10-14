@@ -407,8 +407,18 @@ def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_even
             if not q["quarantined"]:
                 print("         nothing actually failing -- stopping this prophecy")
                 return next_graph, next_invocation, "test suite disagreed with itself"
-            # the suite is re-lit from the frontier and should now pass on
-            # its own; it cannot be forced, and should not be.
+            # light repair.test past the quarantine without asking the model
+            # for another rewrite: that is what puts test.suite back in the
+            # frontier, where it re-runs and should now pass on its own. A
+            # bare `continue` here left repair.test in the frontier, so the
+            # next step quarantined again, found nothing, and stopped a
+            # healthy lineage with "disagreed with itself".
+            result = http_json(f"{BRIDGE}/api/light",
+                               {"pid": pid, "torch": torch_id, "option": torch["options"][0]})
+            if on_event:
+                res = result["result"]
+                on_event({"torch": torch_id, "kind": torch["kind"], "option": res["option"],
+                          "filesWritten": res["filesWritten"]})
             continue
 
         print(f"  [{step}] {torch_id} ({torch['kind']})")

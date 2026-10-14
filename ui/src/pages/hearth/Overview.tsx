@@ -2,6 +2,7 @@ import { useOutletContext } from "react-router-dom"
 import { useState } from "react"
 import type { HearthContext } from "./HearthLayout"
 import { GraphChip } from "../../components/Badges"
+import { useRunStore } from "../../lib/runStore"
 
 export default function Overview() {
   const { hearth, lineage, state } = useOutletContext<HearthContext>()
@@ -20,8 +21,24 @@ export default function Overview() {
   const ceiling = reason.includes("step ceiling")
   const stoppedByUser = reason.startsWith("stopped after")
 
+  // a runner can stop with torches still in the frontier (stuck, step
+  // ceiling, error, stopped by hand) -- the panel used to hide in exactly
+  // that case, so a stopped lineage just looked idle
+  const live = useRunStore((s) => !!s.runs[hearth.id])
+  const stoppedMidWalk = frontierOpen && !live && !!reason && !reason.startsWith("walk complete")
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-6">
+      {stoppedMidWalk && !hearth.halted && (
+        <div className="mb-5 flex gap-4 rounded-xl border border-[#4a3a1a] bg-warnbg p-4">
+          <span className="w-[3px] shrink-0 self-stretch rounded bg-warn" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[14.5px] font-semibold text-bone">Stopped partway through generation {hearth.generations}</h3>
+            <div className="mt-1 font-mono text-[12.5px] text-ash">{reason}</div>
+            <div className="mt-1 text-[13px] text-ash">Nothing is driving it. Use Resume driving above to continue from here.</div>
+          </div>
+        </div>
+      )}
       {(hearth.halted || !frontierOpen) && (
         <div className="flex gap-4 rounded-xl border border-[#4a2620] bg-failbg p-4">
           <span className="w-[3px] shrink-0 self-stretch rounded bg-fail" />
