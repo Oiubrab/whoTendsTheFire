@@ -270,6 +270,8 @@ BROKEN = {
                   "create table child%(n)s (parent_id integer references parent%(n)s(id));\n"
                   "insert into child%(n)s values (99);\n"),
     "spec": "order: x:text\n",
+    # parses as text, so it is written; names a construct that does not exist
+    "plan": "newfile features/broken.py skeleton=py_module\nrender quantum_loop as q\n",
 }
 
 
@@ -283,16 +285,17 @@ def _broken(kind, n):
 # A canned compose plan: a real plan in the real grammar, so the harness
 # exercises tools/compose.py rather than a stand-in. Every block here must
 # render, insert and compile, or the canned run proves nothing.
-FAKE_COMPOSE_PLAN = """newfile features/grading.py skeleton=py_module doc="grading helpers built from blocks"
+FAKE_COMPOSE_PLAN = """newfile features/grade_cmd.py skeleton=cli_command command=grade help="grade a score" doc="grade, built from blocks"
 render if_elif_else as grader func=grade arg=score default=F branch=">=:90:A" branch=">=:80:B" branch=">=:70:C"
-render switch_dispatch as colours func=describe key=code default=unknown case=r:red case=g:green case=b:blue
-render for_loop as summer func=total collection=numbers item=n acc=result acc_start=0 acc_op=+= item_expr=n verb=summing
-render logic_gates as gates
-import "import os" into features/grading.py
-insert grader into features/grading.py slot=body
-insert colours into features/grading.py slot=body
-insert summer into features/grading.py slot=body
-insert gates into features/grading.py slot=body
+render try_fallback as parse func=to_int arg=text call=int exc=ValueError,TypeError fallback=0
+render count_by as tally func=tally collection=grades
+render cli_argument as score_arg name=score type=int help="the score to grade"
+render print_call as show func=grade args=score
+insert grader into features/grade_cmd.py slot=helpers
+insert parse into features/grade_cmd.py slot=helpers
+insert tally into features/grade_cmd.py slot=helpers
+insert score_arg into features/grade_cmd.py slot=arguments
+insert show into features/grade_cmd.py slot=body
 """
 
 
@@ -316,6 +319,7 @@ def fake_answer(prompt, target=None, torch=None):
                 "view" if target.startswith("web/views/") else
                 "migration" if target.endswith(".sql") else
                 "spec" if target == ".resource-spec.txt" else
+                "plan" if target == ".compose-plan.txt" else
                 "feature" if target.endswith(".py") else None)
         if kind:
             b = _broken(kind, n)

@@ -1,0 +1,6 @@
+def {{FUNC}}({{ARG}}):
+    """{{CALL}}({{ARG}}), or {{FALLBACK}} if that raises {{EXC_DOC}}."""
+    try:
+        return {{CALL}}({{ARG}})
+    except {{EXC}}:
+        return {{FALLBACK}}

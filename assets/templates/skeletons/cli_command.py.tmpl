@@ -1,0 +1,16 @@
+"""{{DOC}}"""
+# @slot imports
+
+
+# @slot helpers
+
+
+def run(args):
+    # @slot body
+    return None
+
+
+def register(sub):
+    p = sub.add_parser("{{COMMAND}}", help="{{HELP}}")
+    # @slot arguments
+    p.set_defaults(func=run)

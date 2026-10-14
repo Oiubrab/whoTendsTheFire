@@ -4,6 +4,7 @@
 A plan is `.compose-plan.txt`, one operation per line, in a closed grammar:
 
     newfile PATH skeleton=py_module doc="what this module is for"
+    newfile PATH skeleton=cli_command command=NAME help="..." [doc="..."]
     render CONSTRUCT as NAME key=value key=value ...
     insert NAME into PATH slot=SLOT
     import "LINE" into PATH
@@ -28,6 +29,7 @@ Every phase is idempotent, so re-running a torch changes nothing.
 
     python3 tools/compose.py check              # is the plan well-formed?
     python3 tools/compose.py apply PHASE        # newfile|render|insert|import
+    python3 tools/compose.py verify             # run every command the plan built
     python3 tools/compose.py --check            # self-test
 """
 
@@ -46,7 +48,12 @@ import slot  # noqa: E402
 
 PLAN = ".compose-plan.txt"
 SNIPPETS = ".compose"
-SKELETONS = ("py_module",)
+SKELETONS = {
+    # skeleton: (required keys, optional keys)
+    "py_module": ((), ("doc",)),
+    "cli_command": (("command", "help"), ("doc",)),
+}
+COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
 PHASES = ("newfile", "render", "insert", "import")
 
 # constructs and which of their keys may repeat (collected into a list/dict)
@@ -57,6 +64,12 @@ CONSTRUCTS = {
     "while_loop": logic.while_loop,
     "switch_dispatch": logic.switch_dispatch,
     "logic_gates": lambda spec: logic.logic_gates(),
+    "try_fallback": logic.try_fallback,
+    "filter_list": logic.filter_list,
+    "record": logic.record,
+    "count_by": logic.count_by,
+    "cli_argument": logic.cli_argument,
+    "print_call": logic.print_call,
 }
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -74,7 +87,7 @@ def safe_path(p, line):
 
 
 def keyvals(tokens, line):
-    spec, branches, cases = {}, [], {}
+    spec, branches, cases, fields = {}, [], {}, []
     for t in tokens:
         if "=" not in t:
             raise PlanError("line %d: expected key=value, got %r" % (line, t))
@@ -84,6 +97,8 @@ def keyvals(tokens, line):
             if len(parts) != 3:
                 raise PlanError("line %d: branch must be OP:LIMIT:LABEL, got %r" % (line, v))
             branches.append(tuple(parts))
+        elif k == "field":
+            fields.append(v)
         elif k == "case":
             if ":" not in v:
                 raise PlanError("line %d: case must be KEY:TEXT, got %r" % (line, v))
@@ -99,6 +114,8 @@ def keyvals(tokens, line):
         spec["branches"] = branches
     if cases:
         spec["cases"] = cases
+    if fields:
+        spec["fields"] = fields
     return spec
 
 
@@ -117,10 +134,29 @@ def parse(text):
             if len(tok) < 3:
                 raise PlanError("line %d: newfile PATH skeleton=NAME [doc=TEXT]" % n)
             kv = keyvals(tok[2:], n)
-            if kv.get("skeleton") not in SKELETONS:
-                raise PlanError("line %d: skeleton must be one of %s" % (n, ", ".join(SKELETONS)))
-            doc = logic.label(kv.get("doc", "generated module"), "doc")
-            ops.append(dict(op="newfile", path=safe_path(tok[1], n), skeleton=kv["skeleton"], doc=doc, line=n))
+            sk = kv.pop("skeleton", None)
+            if sk not in SKELETONS:
+                raise PlanError("line %d: skeleton must be one of %s" % (n, ", ".join(sorted(SKELETONS))))
+            required, optional = SKELETONS[sk]
+            missing = [k for k in required if k not in kv]
+            extra = [k for k in kv if k not in required + optional]
+            if missing or extra:
+                raise PlanError("line %d: skeleton %s needs %s%s" % (
+                    n, sk, ", ".join(required) or "no keys",
+                    ("; does not take " + ", ".join(extra)) if extra else ""))
+            try:
+                toks = {"DOC": logic.label(kv.get("doc", "generated module"), "doc")}
+                if sk == "cli_command":
+                    if not COMMAND.match(kv["command"]):
+                        raise PlanError("line %d: command %r must be lowercase letters, digits, hyphens" % (n, kv["command"]))
+                    toks["COMMAND"] = kv["command"]
+                    toks["HELP"] = logic.label(kv["help"], "help")
+            except logic.LogicError as e:
+                raise PlanError("line %d: %s" % (n, e))
+            path = safe_path(tok[1], n)
+            if not path.endswith(".py"):
+                raise PlanError("line %d: a python skeleton must be written to a .py path" % n)
+            ops.append(dict(op="newfile", path=path, skeleton=sk, toks=toks, line=n))
         elif verb == "render":
             if len(tok) < 4 or tok[2] != "as":
                 raise PlanError("line %d: render CONSTRUCT as NAME key=value ..." % n)
@@ -148,26 +184,60 @@ def parse(text):
     return ops
 
 
-def skeleton_slots(name):
-    text = (ROOT / "templates" / "skeletons" / ("%s.py.tmpl" % name)).read_text()
-    found = set()
+def slot_indents(text):
+    found = {}
     for l in text.splitlines():
         m = slot.MARKER.match(l)
         if m:
-            found.add(m.group("name"))
+            found[m.group("name")] = m.group("indent")
     return found
+
+
+def skeleton_text(name):
+    return (ROOT / "templates" / "skeletons" / ("%s.py.tmpl" % name)).read_text()
+
+
+def skeleton_slots(name):
+    return slot_indents(skeleton_text(name))
+
+
+def existing_commands(root):
+    """Subcommand names already registered by modules in features/."""
+    names = set()
+    fdir = root / "features"
+    if fdir.is_dir():
+        for f in fdir.glob("*.py"):
+            names.update(re.findall(r'add_parser\(\s*"([^"]+)"', f.read_text(errors="replace")))
+    return names
 
 
 def validate(ops, root=ROOT):
     """Everything checkable without touching a file: references and slots."""
-    created = {o["path"]: skeleton_slots(o["skeleton"]) for o in ops if o["op"] == "newfile"}
-    rendered = {}
+    created, commands = {}, set()
+    taken = existing_commands(root)
+    for o in ops:
+        if o["op"] != "newfile":
+            continue
+        if o["path"] in created:
+            raise PlanError("line %d: %s is created twice" % (o["line"], o["path"]))
+        if (root / o["path"]).exists():
+            raise PlanError("line %d: %s already exists -- newfile only creates" % (o["line"], o["path"]))
+        created[o["path"]] = skeleton_slots(o["skeleton"])
+        cmd = o["toks"].get("COMMAND")
+        if cmd:
+            if cmd in taken:
+                raise PlanError("line %d: a command called %r already exists in features/" % (o["line"], cmd))
+            if cmd in commands:
+                raise PlanError("line %d: command %r is created twice in this plan" % (o["line"], cmd))
+            commands.add(cmd)
+    rendered, kinds = {}, {}
     for o in ops:
         if o["op"] == "render":
             if o["name"] in rendered:
                 raise PlanError("line %d: block %r rendered twice" % (o["line"], o["name"]))
             try:  # a real render, so a bad spec is caught now, not mid-apply
                 rendered[o["name"]] = CONSTRUCTS[o["construct"]](o["spec"])
+                kinds[o["name"]] = o["construct"]
             except logic.LogicError as e:
                 raise PlanError("line %d: %s" % (o["line"], e))
     for o in ops:
@@ -179,13 +249,25 @@ def validate(ops, root=ROOT):
             if path in created:
                 have = created[path]
             elif target.exists():
-                have = set(slot.list_slots(target))
+                have = slot_indents(target.read_text())
             else:
                 raise PlanError("line %d: %s does not exist and no newfile creates it" % (o["line"], path))
             want = o["slot"] if o["op"] == "insert" else "imports"
             if want not in have and not (o["op"] == "import" and path.endswith(".py")):
                 raise PlanError("line %d: %s has no slot %r (it has: %s)"
                                 % (o["line"], path, want, ", ".join(sorted(have)) or "none"))
+            if o["op"] == "insert":
+                # placement is law: a statement belongs only in the slot whose
+                # names it uses; a whole definition only at module level
+                c = kinds[o["name"]]
+                indented = have[want] != ""
+                if c in logic.STATEMENT_SLOTS:
+                    if want not in logic.STATEMENT_SLOTS[c] or not indented:
+                        raise PlanError("line %d: a %s block only goes in slot %s inside a command"
+                                        % (o["line"], c, "/".join(sorted(logic.STATEMENT_SLOTS[c]))))
+                elif indented:
+                    raise PlanError("line %d: a %s block is a whole definition; slot %r is inside a function"
+                                    % (o["line"], c, want))
     return rendered
 
 
@@ -200,8 +282,10 @@ def apply_phase(phase, ops, root=ROOT):
             if target.exists():
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            text = (ROOT / "templates" / "skeletons" / ("%s.py.tmpl" % o["skeleton"])).read_text()
-            target.write_text(text.replace("{{DOC}}", o["doc"]))
+            text = skeleton_text(o["skeleton"])
+            for k, v in o["toks"].items():
+                text = text.replace("{{%s}}" % k, v)
+            target.write_text(text)
             done += 1
         elif phase == "render":
             snippets.mkdir(exist_ok=True)
@@ -214,6 +298,15 @@ def apply_phase(phase, ops, root=ROOT):
             done += 1 if slot.insert(root / o["path"], o["slot"], snip.read_text()) else 0
         elif phase == "import":
             done += 1 if slot.ensure_line(root / o["path"], o["line_text"]) else 0
+    if phase == "import":
+        # the imports a block needs follow it into whatever file it landed
+        # in -- implied by the block, never something the plan has to list
+        by_name = {o["name"]: o for o in ops if o["op"] == "render"}
+        for o in ops:
+            if o["op"] == "insert":
+                r = by_name[o["name"]]
+                for line_text in logic.imports_for(r["construct"], r["spec"]):
+                    done += 1 if slot.ensure_line(root / o["path"], line_text) else 0
     return done
 
 
@@ -222,6 +315,45 @@ def load(root=ROOT):
     if not p.exists():
         raise PlanError("no %s was written" % PLAN)
     return parse(p.read_text())
+
+
+def verify_commands(ops, root=ROOT):
+    """Every command this plan created must load and answer --help."""
+    import subprocess
+    cmds = [(o["path"], o["toks"]["COMMAND"]) for o in ops
+            if o["op"] == "newfile" and o["skeleton"] == "cli_command"]
+    if not cmds:
+        return ["ok   no commands in this plan -- compile is the whole check"], True
+    if not (root / "cli.py").exists():
+        return ["FAIL the plan builds commands but there is no cli.py to run them"], False
+    out, ok = [], True
+    top = subprocess.run([sys.executable, "cli.py", "--help"], cwd=str(root),
+                         capture_output=True, text=True, timeout=60)
+    for path, cmd in cmds:
+        mod = pathlib.Path(path).stem
+        if ("skipping %s" % mod) in top.stderr:
+            out.append("FAIL %s did not load: %s" % (path, top.stderr.strip()[-300:]))
+            ok = False
+            continue
+        r = subprocess.run([sys.executable, "cli.py", cmd, "--help"], cwd=str(root),
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0 or "usage" not in r.stdout.lower():
+            out.append("FAIL `cli.py %s --help` failed: %s" % (cmd, (r.stderr or r.stdout).strip()[-300:]))
+            ok = False
+        else:
+            out.append("ok   cli.py %s loads and answers --help" % cmd)
+    return out, ok
+
+
+def verify_cli():
+    try:
+        ops = load()
+    except PlanError as e:
+        print("FAIL %s" % e)
+        return 1
+    lines, ok = verify_commands(ops)
+    print("\n".join(lines))
+    return 0 if ok else 1
 
 
 def check_cli():
@@ -302,6 +434,46 @@ insert gates into features/grading.py slot=body
             apply_phase(ph, ops, d)
         expect("running every phase again changes nothing", out.read_text() == before)
 
+    cmd_plan = '''
+newfile features/grade_cmd.py skeleton=cli_command command=grade help="grade a score" doc="grade, built from blocks"
+render if_elif_else as grader func=grade arg=score default=F branch=">=:90:A" branch=">=:80:B"
+render record as reading name=Reading field=sensor:str field=value:float field=ok:bool:True
+render cli_argument as score_arg name=score type=int help="the score to grade"
+render print_call as show func=grade args=score
+insert grader into features/grade_cmd.py slot=helpers
+insert reading into features/grade_cmd.py slot=helpers
+insert score_arg into features/grade_cmd.py slot=arguments
+insert show into features/grade_cmd.py slot=body
+'''
+    import shutil
+    import subprocess
+    with tempfile.TemporaryDirectory() as d:
+        d = pathlib.Path(d)
+        shutil.copy(ROOT / "cli.py", d / "cli.py")
+        (d / "features").mkdir()
+        (d / "features" / "__init__.py").write_text("")
+        ops = parse(cmd_plan)
+        validate(ops, d)
+        for ph in PHASES:
+            apply_phase(ph, ops, d)
+        text = (d / "features" / "grade_cmd.py").read_text()
+        lines, ok = verify_commands(ops, d)
+        expect("verify: the command the plan built loads and answers --help", ok, " / ".join(lines))
+        r = subprocess.run([sys.executable, "cli.py", "grade", "85"], cwd=str(d), capture_output=True, text=True)
+        expect("`cli.py grade 85` prints B through the real dispatcher", r.stdout.strip() == "B", r.stdout + r.stderr)
+        expect("the record's import was implied, not listed", "from dataclasses import dataclass" in text)
+        refuses("a command name already taken", cmd_plan.replace("grade_cmd.py", "other.py"), setup=lambda t: (
+            (t / "features").mkdir(), (t / "features" / "x.py").write_text('sub.add_parser("grade")')))
+
+    refuses("a definition put inside a function",
+            "newfile c.py skeleton=cli_command command=go help=h\nrender logic_gates as g\ninsert g into c.py slot=body")
+    refuses("an argument put outside register()",
+            "newfile c.py skeleton=cli_command command=go help=h\nrender cli_argument as a name=n type=int help=h\ninsert a into c.py slot=helpers")
+    refuses("a print_call put in the arguments slot",
+            "newfile c.py skeleton=cli_command command=go help=h\nrender print_call as s func=f\ninsert s into c.py slot=arguments")
+    refuses("a command skeleton without its help", "newfile c.py skeleton=cli_command command=go")
+    refuses("a newfile over an existing file", "newfile a.py skeleton=py_module",
+            setup=lambda t: (t / "a.py").write_text("x = 1\n"))
     refuses("an unknown operation", "frobnicate x")
     refuses("an unknown construct", "render quantum_loop as q")
     refuses("a path that escapes the project", 'newfile ../evil.py skeleton=py_module')
@@ -325,6 +497,8 @@ def main(argv):
         return selftest()
     if argv[:1] == ["check"]:
         return check_cli()
+    if argv[:1] == ["verify"]:
+        return verify_cli()
     if argv[:1] == ["apply"] and len(argv) == 2:
         return apply_cli(argv[1])
     print(__doc__)

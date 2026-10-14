@@ -42,6 +42,8 @@ CASES = [
                                            FAKE_BREAK="route,apitest,view,migration")),
     ("both-resource-fullstack", dict(FAKE_SURFACE="both", FAKE_STORAGE="sqlite", FAKE_LICENSE="mit",
                                      FAKE_KINDLES="g.resource,g.fullstack,g.harden", FAKE_BREAK="spec,test")),
+    ("both-compose", dict(FAKE_SURFACE="both", FAKE_STORAGE="sqlite", FAKE_LICENSE="mit",
+                          FAKE_KINDLES="g.compose,g.harden", FAKE_BREAK="plan")),
     ("rollback-when-repair-never-converges", dict(FAKE_SURFACE="both", FAKE_STORAGE="sqlite", FAKE_LICENSE="mit",
                                                   FAKE_KINDLES="g.feature", FAKE_BREAK_ALWAYS="feature")),
 ]

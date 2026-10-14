@@ -157,7 +157,14 @@ scaf[`scaffold.templates; "templates/logic/for_loop.py.tmpl"]
 scaf[`scaffold.templates; "templates/logic/while_loop.py.tmpl"]
 scaf[`scaffold.templates; "templates/logic/switch_dispatch.py.tmpl"]
 scaf[`scaffold.templates; "templates/logic/logic_gates.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/try_fallback.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/filter_list.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/record.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/count_by.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/cli_argument.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/print_call.py.tmpl"]
 scaf[`scaffold.templates; "templates/skeletons/py_module.py.tmpl"]
+scaf[`scaffold.templates; "templates/skeletons/cli_command.py.tmpl"]
 addrequire[`scaffold.templates; `tools]
 addrequire[`scaffold.templates; `shared]
 addprovide[`scaffold.templates; `; `templates]
@@ -522,9 +529,9 @@ addtorch[`kindle.next; `kindling;
 / when it builds the prompt, the same way an authoring torch's caller
 / appends its target path rather than baking it into the rite.
 addtorch[`choose.graph; `decision;
-  "Which arrangement fits what the next generation is about to build?\n  g.feature   -- add one new command-line subcommand\n  g.route     -- add one new group of HTTP endpoints\n  g.view      -- add one new page to the browser front end\n  g.schema    -- add one new database table, with migration\n  g.fullstack -- a table, the endpoints over it, and a page for it, free-form\n  g.resource  -- the same shape as g.fullstack, but templated: prefer this whenever the thing to build is an ordinary CRUD resource -- it is deterministic and cannot misfire the way free-form authoring can\n  g.harden    -- no new behaviour: tidy, re-verify, regenerate the docs. Only fits if the thing to build is polishing or fixing something that already exists, never if it is something new\n  g.document  -- regenerate documentation and check packaging";
+  "Which arrangement fits what the next generation is about to build?\n  g.feature   -- add one new command-line subcommand\n  g.route     -- add one new group of HTTP endpoints\n  g.view      -- add one new page to the browser front end\n  g.schema    -- add one new database table, with migration\n  g.fullstack -- a table, the endpoints over it, and a page for it, free-form\n  g.resource  -- the same shape as g.fullstack, but templated: prefer this whenever the thing to build is an ordinary CRUD resource -- it is deterministic and cannot misfire the way free-form authoring can\n  g.compose   -- one small command or helper assembled from tested blocks (branches, loops, lookups, fallbacks, records, counts): prefer this over g.feature whenever the logic is one of those shapes -- it is deterministic, and g.feature writes code free-form\n  g.harden    -- no new behaviour: tidy, re-verify, regenerate the docs. Only fits if the thing to build is polishing or fixing something that already exists, never if it is something new\n  g.document  -- regenerate documentation and check packaging";
   "";
-  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document]
+  `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.compose`g.harden`g.document]
 
 / ================= the graph library =================
 / Nine arrangements over the one vocabulary above. `members` is
@@ -779,7 +786,7 @@ addedge[`g.document; `verify.progress; `fail;     `kindle.next]
   addedge[g; `kindle.next; `written; `choose.graph];
   addedge[g; `kindle.next; `decline; `];
   {[g;lbl] addedge[g; `choose.graph; lbl; `]}[g] each
-    `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document
+    `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.compose`g.harden`g.document
  } each `g.found`g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document`g.resource`g.compose;
 
 / ---- capability gates on the checks themselves ----
@@ -907,7 +914,7 @@ addedge[`g.resource; `verify.progress; `fail;     `kindle.next]
 / one place a choice was made, gets a repair path.
 
 addauthor[`declare.compose; `authoring;
-  "Plan ONE new helper module, built from blocks. Reply with the plan only, one operation per line, nothing else.\n\nOperations:\n  newfile features/NAME.py skeleton=py_module doc=\"what it is for\"\n  render CONSTRUCT as BLOCK key=value ...\n  insert BLOCK into features/NAME.py slot=body\n  import \"import x\" into features/NAME.py\n\nConstructs and their keys:\n  if_else      func arg op limit then else\n  if_elif_else func arg default branch=OP:LIMIT:LABEL (repeat)\n  for_loop     func collection item acc acc_start acc_op item_expr verb\n  while_loop   func start continue_op bound step_op step\n  switch_dispatch func key default case=KEY:TEXT (repeat)\n  logic_gates  (no keys)\n\nOperators are < <= > >= == !=. Names are lowercase python identifiers. Labels have no quotes. Choose names that say what the block does. Look at SURVEY.txt above and do not reuse a module name that already exists.";
+  "Plan ONE small addition to this app, built from blocks. Reply with the plan only, one operation per line, nothing else.\n\nOperations:\n  newfile features/NAME.py skeleton=cli_command command=CMD help=\"what CMD does\"\n  newfile features/NAME.py skeleton=py_module doc=\"what it is for\"\n  render CONSTRUCT as BLOCK key=value ...\n  insert BLOCK into features/NAME.py slot=SLOT\n\nA cli_command file has slots: helpers (whole definitions), arguments (cli_argument blocks only), body (print_call blocks only). A py_module file has slot body (whole definitions).\n\nConstructs and their keys:\n  if_else         func arg op limit then else\n  if_elif_else    func arg default branch=OP:LIMIT:LABEL (repeat)\n  for_loop        func collection item acc acc_start acc_op item_expr verb\n  while_loop      func start continue_op bound step_op step\n  switch_dispatch func key default case=KEY:TEXT (repeat)\n  filter_list     func collection item op limit\n  count_by        func collection [key]\n  try_fallback    func arg call exc fallback   (call: int float str len abs round json.loads math.sqrt statistics.mean statistics.median date.fromisoformat)\n  record          name field=NAME:TYPE[:DEFAULT] (repeat; types str int float bool; defaulted fields last)\n  logic_gates     (no keys)\n  cli_argument    name type help [optional=yes default=V]\n  print_call      func [args=a,b]\n\nImports are added automatically. Operators are < <= > >= == !=. Names are lowercase python identifiers; record names are CapWords. Labels have no quotes. Look at SURVEY.txt above: do not reuse a command or module name that already exists, and build something that serves the ember.";
   ".compose-plan.txt"; ""; enlist `written]
 addrequire[`declare.compose; `templates]
 addrequire[`declare.compose; `tools]
@@ -922,9 +929,13 @@ addtorch[`compose.newfile; `action; ""; "python3 tools/compose.py apply newfile"
 addtorch[`compose.render;  `action; ""; "python3 tools/compose.py apply render";  enlist `done]
 addtorch[`compose.insert;  `action; ""; "python3 tools/compose.py apply insert";  enlist `done]
 addtorch[`compose.import;  `action; ""; "python3 tools/compose.py apply import";  enlist `done]
+/ compile proves the module parses. This proves a command the plan built
+/ is actually loaded by the dispatcher and answers --help -- the failure a
+/ parse check cannot see, like a dataclass that only refuses at import.
+addtorch[`verify.composed; `validation; ""; "python3 tools/compose.py verify"; `pass`fail]
 
 addgraph[`g.compose; `declare.compose; "build a helper module from blocks -- branches, loops, switches, gates -- placed by slot, with no free-form code"]
-addto[`g.compose;] each `declare.compose`verify.compose`repair.compose`compose.newfile`compose.render`compose.insert`compose.import`verify.compile`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
+addto[`g.compose;] each `declare.compose`verify.compose`repair.compose`compose.newfile`compose.render`compose.insert`compose.import`verify.compile`verify.composed`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
 addedge[`g.compose; `declare.compose;  `written;  `verify.compose]
 addedge[`g.compose; `verify.compose;   `fail;     `repair.compose]
 addedge[`g.compose; `repair.compose;   `repaired; `verify.compose]
@@ -934,7 +945,9 @@ addedge[`g.compose; `compose.render;   `done;     `compose.insert]
 addedge[`g.compose; `compose.insert;   `done;     `compose.import]
 addedge[`g.compose; `compose.import;   `done;     `verify.compile]
 addedge[`g.compose; `verify.compile;   `fail;     `rollback.generation]
-addedge[`g.compose; `verify.compile;   `pass;     `tidy.run]
+addedge[`g.compose; `verify.compile;   `pass;     `verify.composed]
+addedge[`g.compose; `verify.composed;  `fail;     `rollback.generation]
+addedge[`g.compose; `verify.composed;  `pass;     `tidy.run]
 addedge[`g.compose; `tidy.run;         `done;     `survey.run]
 addedge[`g.compose; `survey.run;       `done;     `docs.generate]
 addedge[`g.compose; `docs.generate;    `done;     `git.commit]
