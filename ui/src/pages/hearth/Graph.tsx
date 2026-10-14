@@ -2,9 +2,10 @@ import { useMemo, useState } from "react"
 import { useOutletContext } from "react-router-dom"
 import { toast } from "sonner"
 import type { HearthContext } from "./HearthLayout"
-import { useGraphLibrary, useInvalidateRun } from "../../api/hooks"
+import { useCalls, useGraphLibrary, useInvalidateRun } from "../../api/hooks"
 import { TorchGraph } from "../../graph/TorchGraph"
-import { KindBadge } from "../../components/Badges"
+import { TorchInspector } from "../../graph/TorchInspector"
+import { useRunStore } from "../../lib/runStore"
 import { api } from "../../api/client"
 import type { GraphNode } from "../../api/types"
 import { ManualKindleDialog } from "../../components/ManualKindleDialog"
@@ -30,11 +31,12 @@ export default function Graph() {
     return scope === "library" ? lib.edges : lib.edges.filter((e) => e.graph === state.graph)
   }, [lib, scope, state.graph])
 
+  const thisGraphEdges = useMemo(() => lib?.edges.filter((e) => e.graph === state.graph) ?? [], [lib, state.graph])
+  const runActive = !!useRunStore((s) => s.runs[hearth.id])
+  const { data: calls } = useCalls(pid, { poll: runActive })
+
   const lit = useMemo(() => new Set(state.trail.map((t) => t.torch)), [state.trail])
   const frontier = useMemo(() => new Set(state.frontier), [state.frontier])
-  const isFrontier = !!selected && frontier.has(selected.id)
-  const lastTrail = selected ? [...state.trail].reverse().find((t) => t.torch === selected.id) : undefined
-  const outcomes = selected ? edges.filter((e) => e.src === selected.id) : []
 
   if (!lib) return <div className="p-7 text-[13px] text-dim">Loading graph…</div>
 
@@ -91,61 +93,28 @@ export default function Graph() {
           {!selected ? (
             <div className="text-[13px] text-dim">Click a torch to inspect it.</div>
           ) : (
-            <div className="grid gap-3.5">
-              <div className="flex items-center justify-between">
-                <h3 className="font-mono text-[15px] text-bone">{selected.id}</h3>
-                <KindBadge kind={selected.kind} />
-              </div>
-              {selected.rite && <p className="text-[12.5px] text-ash">{selected.rite}</p>}
-
-              {lastTrail && (
-                <div className="text-[12px]">
-                  <span className="text-dim">last result </span>
-                  <span className={lastTrail.option === "fail" ? "text-fail" : "text-pass"}>{lastTrail.option}</span>
-                </div>
-              )}
-              {selected.id === state.lastcheck.torch && state.lastcheck.output && (
-                <pre className="max-h-40 overflow-auto rounded-md border border-line bg-soot px-2.5 py-2 font-mono text-[11px] whitespace-pre-wrap text-[#f1b2a8]">
-                  {state.lastcheck.output}
-                </pre>
-              )}
-
-              {outcomes.length > 0 && (
-                <div>
-                  <div className="mb-1.5 text-[11px] tracking-wide text-dim uppercase">Outcomes</div>
-                  <div className="grid gap-1">
-                    {outcomes.map((e, i) => (
-                      <div
-                        key={i}
-                        className="flex justify-between rounded border border-line px-2 py-1 font-mono text-[11.5px]"
-                      >
-                        <span className={e.label === "fail" ? "text-fail" : "text-ash"}>{e.label}</span>
-                        <span className="text-dim">→ {e.dst || "end"}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {isFrontier && (
-                <div className="border-t border-line pt-3.5">
-                  <div className="mb-2 text-[11px] tracking-wide text-dim uppercase">Available now</div>
-                  <TorchActions
-                    node={selected}
-                    busy={busy}
-                    onLight={(opt) => run(() => api.light(pid, selected.id, opt))}
-                    onAuthor={() =>
-                      run(async () => {
-                        const r = await api.authorize(pid, selected.id)
-                        toast.success(`wrote ${r.path} (${r.bytes} bytes)`)
-                        await api.light(pid, selected.id, selected.options[0])
-                      })
-                    }
-                    onKindle={() => setKindling(selected)}
-                  />
-                </div>
-              )}
-            </div>
+            <TorchInspector
+              node={selected}
+              nodes={lib.nodes}
+              edges={thisGraphEdges}
+              state={state}
+              calls={calls ?? []}
+              runActive={runActive}
+              busy={busy}
+              actions={
+                selected.kind === "authoring" ? null : (
+                  <>
+                    <TorchActions
+                      node={selected}
+                      busy={busy}
+                      onLight={(opt) => run(() => api.light(pid, selected.id, opt))}
+                      onKindle={() => setKindling(selected)}
+                    />
+                    <p className="mt-1.5 text-[11.5px] leading-snug text-dim">{HINTS[selected.kind]}</p>
+                  </>
+                )
+              }
+            />
           )}
         </div>
       </div>
@@ -163,30 +132,24 @@ export default function Graph() {
   )
 }
 
+const HINTS: Record<string, string> = {
+  kindling: "Asks the model to propose the next generation's graph, which you then approve.",
+  validation: "Runs this check against the project now; pass or fail decides which torch comes next.",
+  action: "Pick an outcome to record it manually and move the walk on.",
+  decision: "Pick an outcome to record it manually and move the walk on.",
+}
+
 function TorchActions({
   node,
   busy,
   onLight,
-  onAuthor,
   onKindle,
 }: {
   node: GraphNode
   busy: boolean
   onLight: (option: string) => void
-  onAuthor: () => void
   onKindle: () => void
 }) {
-  if (node.kind === "authoring") {
-    return (
-      <button
-        onClick={onAuthor}
-        disabled={busy}
-        className="w-full rounded-md bg-ember px-3 py-1.5 text-[12.5px] font-semibold text-[#1b1009] hover:bg-ember2 disabled:opacity-50"
-      >
-        Write with the model
-      </button>
-    )
-  }
   if (node.kind === "kindling") {
     return (
       <button
