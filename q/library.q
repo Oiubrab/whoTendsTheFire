@@ -335,8 +335,12 @@ addtorch[`verify.subcommands; `validation; "";
   `pass`fail]
 
 / the http dispatcher loads every route module and can list its routes.
+/ Was `A && B && { fail; } || C`: the trailing `|| C` re-ran the listing
+/ after the failure branch and passed, so a route module that crashed on
+/ import -- skipped by serve.py with a note on stderr -- sailed through
+/ every route check. Found by torchtest.py injecting exactly that.
 addtorch[`verify.routes; `validation; "";
-  "python3 serve.py --list 2>/tmp/e.out && test -s /tmp/e.out && { echo 'a route module was skipped:'; cat /tmp/e.out; false; } || python3 serve.py --list";
+  "python3 serve.py --list >/tmp/r.out 2>/tmp/e.out; rc=$?; if [ $rc -ne 0 ] || [ -s /tmp/e.out ]; then echo 'route listing failed, or a route module was skipped:'; cat /tmp/e.out; false; else cat /tmp/r.out; fi";
   `pass`fail]
 
 / the server is actually started, actually connected to, and every route
@@ -460,11 +464,29 @@ addtool[`git.commit; `; `git; "command -v git"; "true"]
 / torch at all: nothing was ever built, the empty test suite reported
 / "no tests found" as a failure, and the next kindling call read that
 / as "something is broken, prefer g.harden" -- a closed loop with no
-/ exit. Routed to a dead end on failure, the same as an unrepairable
-/ validation failure anywhere else in this library: a prophecy that
-/ cannot make progress does not reach its kindling torch, matching
-/ docs/03's own rule that a dead prophecy leaves no daughter.
+/ exit. On failure it now goes back to kindle.next rather than to a dead
+/ end: nothing changed, so there is nothing to roll back, and LAST CHECK
+/ in the brief tells the kindling call this generation was wasted.
 addtorch[`verify.progress; `validation; ""; "python3 tools/progresscheck.py"; `pass`fail]
+
+/ ---- recovery: no failure ends a lineage ----
+/ Law, not advice: every fail edge in this library leads to a torch that
+/ deals with it, never to the dead end (libcheck refuses a library that
+/ breaks this). A failure goes first to the repair torch built for its
+/ artifact; where there is none -- law-generated output, a harden pass, a
+/ check on scaffolding -- or the walker sees a repair loop that will not
+/ converge, it escalates here. This puts the working tree back to the last
+/ committed generation, discarding only this generation's broken work, and
+/ hands over to kindle.next, which reads the failure in LAST CHECK and
+/ proposes something else. verify.progress failing goes straight to
+/ kindle.next instead: a generation that changed nothing has nothing to
+/ undo, only something else to try. The one remaining end is kindle.next
+/ declining, which is a decision, not a failure.
+/ git clean without -x keeps ignored files (app.db), so data survives.
+addtorch[`rollback.generation; `action; "";
+  "if git rev-parse -q --verify HEAD >/dev/null 2>&1; then git reset -q --hard HEAD && git clean -qfd && echo 'rolled back to the last committed generation:' && git log --oneline -1; else echo 'nothing committed yet -- nothing to roll back'; fi; true";
+  enlist `done]
+addtool[`rollback.generation; `; `git; "command -v git"; "true"]
 
 / ---- kindling: reproduction, and the only executive call in the library ----
 / docs/04: kindling asks "what should we build next?", the dynamo asks
@@ -487,7 +509,7 @@ addtorch[`verify.progress; `validation; ""; "python3 tools/progresscheck.py"; `p
 / against a fixed menu is a grounded task; inventing the sentence and
 / picking the label simultaneously was not.
 addtorch[`kindle.next; `kindling;
-  "This generation is finished and verified. SURVEY.txt above is an inventory of what the codebase actually contains now, derived from the code itself.\n\nName in ONE sentence the single most worthwhile thing to build next, given what already exists and what the ember is ultimately for. Do not say how or where -- only what. If nothing worthwhile remains, reply with exactly: DECLINE";
+  "This generation is over. If LAST CHECK above shows a failure, that generation's work was rolled back and you should propose something that avoids it. SURVEY.txt above is an inventory of what the codebase actually contains now, derived from the code itself.\n\nName in ONE sentence the single most worthwhile thing to build next, given what already exists and what the ember is ultimately for. Do not say how or where -- only what. If nothing worthwhile remains, reply with exactly: DECLINE";
   "";
   `written`decline]
 
@@ -562,12 +584,12 @@ addedge[`g.found; `choose.license; `mit;       `verify.compile]
 addedge[`g.found; `choose.license; `apache;    `verify.compile]
 addedge[`g.found; `choose.license; `unlicense; `verify.compile]
 addedge[`g.found; `verify.compile; `pass; `survey.run]
-addedge[`g.found; `verify.compile; `fail; `]
+addedge[`g.found; `verify.compile; `fail; `rollback.generation]
 addedge[`g.found; `survey.run;     `done; `docs.generate]
 addedge[`g.found; `docs.generate;  `done; `git.commit]
 addedge[`g.found; `git.commit;      `done;     `verify.progress]
 addedge[`g.found; `verify.progress; `pass;     `kindle.next]
-addedge[`g.found; `verify.progress; `fail;     `]
+addedge[`g.found; `verify.progress; `fail;     `kindle.next]
 addedge[`g.found; `kindle.next;    `written;     `choose.graph]
 addedge[`g.found; `kindle.next;    `decline;     `]
 
@@ -596,7 +618,7 @@ addedge[`g.feature; `survey.run;        `done;     `docs.generate]
 addedge[`g.feature; `docs.generate;     `done;     `git.commit]
 addedge[`g.feature; `git.commit;      `done;     `verify.progress]
 addedge[`g.feature; `verify.progress; `pass;     `kindle.next]
-addedge[`g.feature; `verify.progress; `fail;     `]
+addedge[`g.feature; `verify.progress; `fail;     `kindle.next]
 
 / ---- g.route: one new group of HTTP endpoints ----
 addgraph[`g.route; `author.route; "add one verified group of HTTP endpoints to an existing app"]
@@ -623,7 +645,7 @@ addedge[`g.route; `survey.run;     `done;     `docs.generate]
 addedge[`g.route; `docs.generate;  `done;     `git.commit]
 addedge[`g.route; `git.commit;      `done;     `verify.progress]
 addedge[`g.route; `verify.progress; `pass;     `kindle.next]
-addedge[`g.route; `verify.progress; `fail;     `]
+addedge[`g.route; `verify.progress; `fail;     `kindle.next]
 
 / ---- g.view: one new page in the browser front end ----
 addgraph[`g.view; `author.view; "add one page to the browser front end, structurally checked"]
@@ -637,7 +659,7 @@ addedge[`g.view; `verify.api;   `fail;     `repair.view]
 addedge[`g.view; `survey.run;   `done;     `git.commit]
 addedge[`g.view; `git.commit;      `done;     `verify.progress]
 addedge[`g.view; `verify.progress; `pass;     `kindle.next]
-addedge[`g.view; `verify.progress; `fail;     `]
+addedge[`g.view; `verify.progress; `fail;     `kindle.next]
 
 / ---- g.schema: one new database table ----
 addgraph[`g.schema; `author.migration; "add one database table via a migration, verified by reading the schema back"]
@@ -648,14 +670,14 @@ addedge[`g.schema; `repair.migration; `repaired; `verify.schema]
 addedge[`g.schema; `verify.schema;    `pass;     `db.migrate]
 addedge[`g.schema; `db.migrate;       `done;     `verify.compile]
 addedge[`g.schema; `verify.compile;   `pass;     `test.suite]
-addedge[`g.schema; `verify.compile;   `fail;     `]
+addedge[`g.schema; `verify.compile;   `fail;     `rollback.generation]
 addedge[`g.schema; `test.suite;       `pass;     `survey.run]
 addedge[`g.schema; `test.suite;       `fail;     `survey.run]
 addedge[`g.schema; `survey.run;       `done;     `docs.generate]
 addedge[`g.schema; `docs.generate;    `done;     `git.commit]
 addedge[`g.schema; `git.commit;      `done;     `verify.progress]
 addedge[`g.schema; `verify.progress; `pass;     `kindle.next]
-addedge[`g.schema; `verify.progress; `fail;     `]
+addedge[`g.schema; `verify.progress; `fail;     `kindle.next]
 
 / ---- g.fullstack: a table, endpoints over it, and a page for it ----
 / The composite, and the one arrangement that produces a feature a user
@@ -693,7 +715,7 @@ addedge[`g.fullstack; `survey.run;       `done;     `docs.generate]
 addedge[`g.fullstack; `docs.generate;    `done;     `git.commit]
 addedge[`g.fullstack; `git.commit;      `done;     `verify.progress]
 addedge[`g.fullstack; `verify.progress; `pass;     `kindle.next]
-addedge[`g.fullstack; `verify.progress; `fail;     `]
+addedge[`g.fullstack; `verify.progress; `fail;     `kindle.next]
 
 / ---- g.harden: no new behaviour, and almost no model ----
 / The ratchet as an arrangement. Nine torches, of which exactly one
@@ -709,13 +731,13 @@ addedge[`g.harden; `verify.tidy;     `fail; `compile.all]
 addedge[`g.harden; `compile.all;     `done; `verify.compile]
 addedge[`g.harden; `verify.compile;  `pass; `verify.cli]
 addedge[`g.harden; `verify.compile;  `pass; `verify.routes]
-addedge[`g.harden; `verify.compile;  `fail; `]
+addedge[`g.harden; `verify.compile;  `fail; `rollback.generation]
 addedge[`g.harden; `verify.cli;      `pass; `verify.subcommands]
-addedge[`g.harden; `verify.cli;      `fail; `]
+addedge[`g.harden; `verify.cli;      `fail; `rollback.generation]
 addedge[`g.harden; `verify.subcommands;`pass;`test.suite]
-addedge[`g.harden; `verify.subcommands;`fail;`]
+addedge[`g.harden; `verify.subcommands;`fail;`rollback.generation]
 addedge[`g.harden; `verify.routes;   `pass; `test.suite]
-addedge[`g.harden; `verify.routes;   `fail; `]
+addedge[`g.harden; `verify.routes;   `fail; `rollback.generation]
 addedge[`g.harden; `test.suite;      `pass; `docs.generate]
 addedge[`g.harden; `test.suite;      `fail; `docs.generate]
 addedge[`g.harden; `docs.generate;   `done; `verify.docs]
@@ -724,7 +746,7 @@ addedge[`g.harden; `verify.docs;     `fail; `survey.run]
 addedge[`g.harden; `survey.run;      `done; `git.commit]
 addedge[`g.harden; `git.commit;      `done;     `verify.progress]
 addedge[`g.harden; `verify.progress; `pass;     `kindle.next]
-addedge[`g.harden; `verify.progress; `fail;     `]
+addedge[`g.harden; `verify.progress; `fail;     `kindle.next]
 
 / ---- g.document: documentation and packaging correctness ----
 / Zero authoring torches. Every artifact this graph produces is derived
@@ -740,7 +762,7 @@ addedge[`g.document; `verify.package; `fail; `survey.run]
 addedge[`g.document; `survey.run;     `done; `git.commit]
 addedge[`g.document; `git.commit;      `done;     `verify.progress]
 addedge[`g.document; `verify.progress; `pass;     `kindle.next]
-addedge[`g.document; `verify.progress; `fail;     `]
+addedge[`g.document; `verify.progress; `fail;     `kindle.next]
 
 / Every kindling torch needs its menu wired in whatever graph it sits in,
 / or the option resolves to nothing and the daughter is never offered.
@@ -752,6 +774,8 @@ addedge[`g.document; `verify.progress; `fail;     `]
 / appears in -- wired in the same loop, since it is the torch that
 / carries the old nine-way branch now.
 {[g]
+  addto[g; `rollback.generation];
+  addedge[g; `rollback.generation; `done; `kindle.next];
   addedge[g; `kindle.next; `written; `choose.graph];
   addedge[g; `kindle.next; `decline; `];
   {[g;lbl] addedge[g; `choose.graph; lbl; `]}[g] each
@@ -785,9 +809,8 @@ addrequire[`verify.web; `web]
 / A law-generated file that fails its check is a template bug, not
 / something a repair torch can fix by guessing -- it never wrote the file
 / and has no more insight into it than the same guess a validation gate
-/ already ran. Those checks dead-end on failure, the same pattern g.schema
-/ and g.harden already use for law that has nothing left for a model to
-/ try. Only the spec line itself -- the one place a genuine, if narrow,
+/ already ran. Those checks escalate to rollback.generation on failure:
+/ undo the generation and let kindle.next pick something else. Only the spec line itself -- the one place a genuine, if narrow,
 / choice was made -- gets a repair path.
 
 addauthor[`author.resourcespec; `authoring;
@@ -827,44 +850,44 @@ addedge[`g.resource; `verify.resourcespec; `fail;     `repair.resourcespec]
 addedge[`g.resource; `repair.resourcespec; `repaired; `verify.resourcespec]
 addedge[`g.resource; `verify.resourcespec; `pass;     `emit.table]
 addedge[`g.resource; `emit.table;          `done;     `verify.schema]
-addedge[`g.resource; `verify.schema;       `fail;     `]
+addedge[`g.resource; `verify.schema;       `fail;     `rollback.generation]
 addedge[`g.resource; `verify.schema;       `pass;     `emit.api.list]
 addedge[`g.resource; `emit.api.list;       `done;     `emit.api.create]
 addedge[`g.resource; `emit.api.create;     `done;     `emit.api.get]
 addedge[`g.resource; `emit.api.get;        `done;     `emit.api.update]
 addedge[`g.resource; `emit.api.update;     `done;     `emit.api.delete]
 addedge[`g.resource; `emit.api.delete;     `done;     `verify.compile]
-addedge[`g.resource; `verify.compile;      `fail;     `]
+addedge[`g.resource; `verify.compile;      `fail;     `rollback.generation]
 addedge[`g.resource; `verify.compile;      `pass;     `verify.routes]
-addedge[`g.resource; `verify.routes;       `fail;     `]
+addedge[`g.resource; `verify.routes;       `fail;     `rollback.generation]
 addedge[`g.resource; `verify.routes;       `pass;     `verify.api]
-addedge[`g.resource; `verify.api;          `fail;     `]
+addedge[`g.resource; `verify.api;          `fail;     `rollback.generation]
 addedge[`g.resource; `verify.api;          `pass;     `emit.cli.list]
 addedge[`g.resource; `emit.cli.list;       `done;     `emit.cli.add]
 addedge[`g.resource; `emit.cli.add;        `done;     `verify.cli]
-addedge[`g.resource; `verify.cli;          `fail;     `]
+addedge[`g.resource; `verify.cli;          `fail;     `rollback.generation]
 addedge[`g.resource; `verify.cli;          `pass;     `verify.subcommands]
-addedge[`g.resource; `verify.subcommands;  `fail;     `]
+addedge[`g.resource; `verify.subcommands;  `fail;     `rollback.generation]
 addedge[`g.resource; `verify.subcommands;  `pass;     `emit.test.cli]
 addedge[`g.resource; `emit.test.cli;       `done;     `emit.view.list]
 addedge[`g.resource; `emit.view.list;      `done;     `emit.view.form]
 addedge[`g.resource; `emit.view.form;      `done;     `verify.web]
-addedge[`g.resource; `verify.web;          `fail;     `]
+addedge[`g.resource; `verify.web;          `fail;     `rollback.generation]
 addedge[`g.resource; `verify.web;          `pass;     `emit.test.roundtrip]
 addedge[`g.resource; `emit.test.roundtrip; `done;     `test.suite]
 addedge[`g.resource; `test.suite;          `fail;     `repair.apitest]
 addedge[`g.resource; `repair.apitest;      `repaired; `test.suite]
 addedge[`g.resource; `test.suite;          `pass;     `verify.roundtrip]
-addedge[`g.resource; `verify.roundtrip;    `fail;     `]
+addedge[`g.resource; `verify.roundtrip;    `fail;     `rollback.generation]
 addedge[`g.resource; `verify.roundtrip;    `pass;     `verify.coverage]
-addedge[`g.resource; `verify.coverage;     `fail;     `]
+addedge[`g.resource; `verify.coverage;     `fail;     `rollback.generation]
 addedge[`g.resource; `verify.coverage;     `pass;     `tidy.run]
 addedge[`g.resource; `tidy.run;            `done;     `survey.run]
 addedge[`g.resource; `survey.run;          `done;     `docs.generate]
 addedge[`g.resource; `docs.generate;       `done;     `git.commit]
 addedge[`g.resource; `git.commit;      `done;     `verify.progress]
 addedge[`g.resource; `verify.progress; `pass;     `kindle.next]
-addedge[`g.resource; `verify.progress; `fail;     `]
+addedge[`g.resource; `verify.progress; `fail;     `kindle.next]
 
 
 / ---- composing: a script built out of blocks ----
@@ -910,7 +933,7 @@ addedge[`g.compose; `compose.newfile;  `done;     `compose.render]
 addedge[`g.compose; `compose.render;   `done;     `compose.insert]
 addedge[`g.compose; `compose.insert;   `done;     `compose.import]
 addedge[`g.compose; `compose.import;   `done;     `verify.compile]
-addedge[`g.compose; `verify.compile;   `fail;     `]
+addedge[`g.compose; `verify.compile;   `fail;     `rollback.generation]
 addedge[`g.compose; `verify.compile;   `pass;     `tidy.run]
 addedge[`g.compose; `tidy.run;         `done;     `survey.run]
 addedge[`g.compose; `survey.run;       `done;     `docs.generate]
@@ -1018,6 +1041,12 @@ libcheck: {[]
        $[0 < count consequences; ();
          enlist "decision torch ",string[tid]," has options with no consequences"]]]
     }[;exec distinct id from graphs where lib=`main] each exec id from torches where kind=`decision;
+
+  / no failure ends a lineage: the only edges allowed to reach the dead end
+  / are kindle.next declining (a decision) and choose.graph handing over to
+  / the daughter it picked. Anything else is a fire that just goes out.
+  dead: select graph,src,label from edges where lib=`main, null dst, not src in `kindle.next`choose.graph;
+  problems,: {"graph ",string[x`graph]," ",string[x`src]," -> ",string[x`label]," leads nowhere"} each 0!dead;
 
   problems }
 

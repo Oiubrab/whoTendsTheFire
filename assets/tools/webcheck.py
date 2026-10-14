@@ -219,6 +219,12 @@ def main():
             checked += 1
         elif p.suffix == ".js":
             errs += js_balance(text, rel)
+            # a view that never calls App.view registers nothing: the page
+            # loads it and nothing appears. Balanced brackets alone passed
+            # that, so verify.web could not fail on a view and repair.view
+            # was unreachable (found by torchtest.py injecting one).
+            if p.parent.name == "views" and "App.view(" not in text:
+                errs.append(rel + ": never calls App.view(...), so it registers no page")
             checked += 1
         elif p.suffix == ".css":
             errs += js_balance(text, rel)

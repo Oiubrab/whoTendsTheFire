@@ -665,6 +665,18 @@ lightin: {[pid;tid;opt]
   update frontier: enlist nf from `prophecies where id=pid;
   @[r; `next; :; nxt] }
 
+/ the walker's way out of a failure the graph itself cannot see: a repair
+/ loop that will not converge, a step ceiling, a check that contradicts
+/ itself. Instead of ending the prophecy it moves the frontier to a
+/ recovery torch (rollback.generation) in the same graph, recorded in the
+/ chronicle like any other step, and the walk carries on from there.
+escalate: {[pid;tid]
+  p: prophecies[pid];
+  if[not tid in exec torch from members where lib=p[`lib], graph=p[`graph];
+    '"not a member of this graph: ",string tid];
+  logchoice[pid;`escalate;tid];
+  update frontier: enlist enlist tid from `prophecies where id=pid; }
+
 / ---- kindling: how one prophecy gives rise to the next ----
 / the reproduction step. A kindling torch, reached at a mature point in
 / a prophecy, looks back at what was actually built and produces the

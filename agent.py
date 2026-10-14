@@ -82,10 +82,11 @@ FAKE_MODEL = os.environ.get("FAKE_MODEL") == "1"
 # characters at a kindling torch.
 NUM_CTX = int(os.environ.get("NUM_CTX", "32768"))
 
+# overridable so the torch test matrix can reach every founding branch
 FAKE_CHOICES = {
-    "choose.surface": "both",
-    "choose.storage": "sqlite",
-    "choose.license": "mit",
+    "choose.surface": os.environ.get("FAKE_SURFACE", "both"),
+    "choose.storage": os.environ.get("FAKE_STORAGE", "sqlite"),
+    "choose.license": os.environ.get("FAKE_LICENSE", "mit"),
 }
 # Overridable so a canned run can be aimed at any arrangement:
 #   FAKE_KINDLES=g.fullstack,g.route,g.view python3 agent.py ...
@@ -385,7 +386,39 @@ def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_even
     next_graph = None
     approved_graph = None
     seen = {}
-    for step in range(1, MAX_STEPS_PER_PROPHECY + 1):
+    # A failure the graph cannot see (a repair loop that will not converge,
+    # the step ceiling, a check that contradicts itself, an engine error)
+    # never ends the prophecy: it escalates once to rollback.generation,
+    # which undoes this generation's work and hands over to kindle.next.
+    # Only a second failure AFTER that would end it -- the recovery path
+    # itself breaking, which is an engine bug, not a lineage outcome.
+    escalated = False
+    limit = MAX_STEPS_PER_PROPHECY
+
+    def escalate(why: str) -> bool:
+        nonlocal escalated, limit
+        if escalated:
+            return False
+        print(f"      escalating to rollback.generation: {why}")
+        r = http_json(f"{BRIDGE}/api/escalate", {"pid": pid, "torch": "rollback.generation"})
+        if "error" in r:
+            print(f"      escalation refused: {r['error']}")
+            return False
+        escalated = True
+        seen.clear()
+        limit = step + 10
+        if on_event:
+            on_event({"torch": "rollback.generation", "kind": "action",
+                      "option": f"escalated ({why})", "filesWritten": 0})
+        return True
+
+    step = 0
+    while True:
+        step += 1
+        if step > limit:
+            if escalate(f"hit the {MAX_STEPS_PER_PROPHECY}-step ceiling"):
+                continue
+            return next_graph, next_invocation, f"hit the step ceiling even after rolling back"
         if should_stop is not None and should_stop():
             return next_graph, next_invocation, f"stopped after {step - 1} step(s)"
         state = http_json(f"{BRIDGE}/api/state?pid={pid}")
@@ -399,13 +432,16 @@ def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_even
 
         seen[torch_id] = seen.get(torch_id, 0) + 1
         if seen[torch_id] > 3 and torch_id != "repair.test":
+            if escalate(f"{torch_id} repeated {seen[torch_id]} times without converging"):
+                continue
             return next_graph, next_invocation, f"stuck: {torch_id} repeated {seen[torch_id]} times"
         # a wrong test must not be able to loop forever against right code
         if torch_id == "repair.test" and seen[torch_id] > 2:
             q = http_json(f"{BRIDGE}/api/quarantine", {"pid": pid})
             print(f"  [{step}] quarantined unfixable test(s): {q['quarantined']}")
             if not q["quarantined"]:
-                print("         nothing actually failing -- stopping this prophecy")
+                if escalate("test suite failed but no single test fails on its own"):
+                    continue
                 return next_graph, next_invocation, "test suite disagreed with itself"
             # light repair.test past the quarantine without asking the model
             # for another rewrite: that is what puts test.suite back in the
@@ -477,6 +513,8 @@ def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_even
         result = http_json(f"{BRIDGE}/api/light", {"pid": pid, "torch": torch_id, "option": option})
         res = result["result"]
         if "error" in res:
+            if escalate(f"engine error at {torch_id}: {res['error']}"):
+                continue
             return next_graph, next_invocation, f"error: {res['error']}"
         if torch["kind"] == "validation":
             print(f"      check ran, outcome: {res['option']!r}")
@@ -488,7 +526,6 @@ def run_prophecy(pid: str, by_id: dict, ember: str, approve_kindle=None, on_even
                 "filesWritten": res["filesWritten"],
             })
 
-    return next_graph, next_invocation, f"hit the {MAX_STEPS_PER_PROPHECY}-step ceiling"
 
 
 def main():

@@ -188,17 +188,23 @@ def register(routes):
     routes.add("POST", "/api/thing%(n)s", make_thing)
 
 
+def _table():
+    db.execute("create table if not exists thing%(n)s ("
+               "id integer primary key autoincrement, name text not null, "
+               "created_at text default current_timestamp)")
+
+
 def list_things(req):
-    try:
-        return {"things": db.query("select * from thing order by id limit 50")}
-    except Exception:
-        return {"things": []}
+    _table()
+    return {"things": db.query("select * from thing%(n)s order by id")}
 
 
 def make_thing(req):
     name = (req.json().get("name") or "").strip()
     if not name:
         raise errors.Invalid("name is required")
+    _table()
+    db.execute("insert into thing%(n)s (name) values (?)", (name,))
     return 201, {"name": name}
 """
 
@@ -228,8 +234,10 @@ while [ $i -lt 40 ]; do
   sleep 0.2
 done
 out=$(python3 -c "import urllib.request,json; print(json.load(urllib.request.urlopen('http://127.0.0.1:8071/api/health'))['ok'])")
+thing=$(python3 -c "import urllib.request,json; print(type(json.load(urllib.request.urlopen('http://127.0.0.1:8071/api/thing{N}'))).__name__)")
 kill $SRV
 [ "$out" = "True" ] || { echo "health check failed: $out"; exit 1; }
+[ "$thing" = "dict" ] || { echo "/api/thing{N} did not answer: $thing"; exit 1; }
 """
 
 FAKE_KINDLES = []
@@ -240,6 +248,36 @@ FAKE_KINDLES = []
 FAKE_RESOURCE_SPECS = ["widget: label:text, qty:integer, done:boolean",
                        "invoice: item:text, amount:real"]
 FAKE_RESOURCE_CALLS = []
+
+
+# Fault injection for the torch test matrix (torchtest.py). Every repair
+# torch only ever lights after a failure, so a canned model that always
+# answers correctly leaves every repair path untested. Each kind named in
+# FAKE_BREAK gets ONE broken answer first (a repair should then fix it);
+# each in FAKE_BREAK_ALWAYS is broken every time (the walker must escalate
+# to rollback.generation rather than stop). Broken means "parses, so it is
+# written, but fails its own check" -- the realistic failure.
+FAKE_BREAK = set(filter(None, os.environ.get("FAKE_BREAK", "").split(",")))
+FAKE_BREAK_ALWAYS = set(filter(None, os.environ.get("FAKE_BREAK_ALWAYS", "").split(",")))
+FAKE_BROKEN_SO_FAR = set()
+BROKEN = {
+    "feature": 'raise RuntimeError("deliberately broken feature module")\n',
+    "route": 'raise RuntimeError("deliberately broken route module")\n',
+    "test": "#!/bin/sh\necho deliberately failing test; exit 1\n",
+    "apitest": "#!/bin/sh\necho deliberately failing api test; exit 1\n",
+    "view": "var unregistered%(n)s = 1;\n",
+    "migration": ("create table parent%(n)s (id integer primary key);\n"
+                  "create table child%(n)s (parent_id integer references parent%(n)s(id));\n"
+                  "insert into child%(n)s values (99);\n"),
+    "spec": "order: x:text\n",
+}
+
+
+def _broken(kind, n):
+    if kind in FAKE_BREAK_ALWAYS or (kind in FAKE_BREAK and kind not in FAKE_BROKEN_SO_FAR):
+        FAKE_BROKEN_SO_FAR.add(kind)
+        return BROKEN[kind].replace("%(n)s", n)
+    return None
 
 
 # A canned compose plan: a real plan in the real grammar, so the harness
@@ -272,9 +310,20 @@ def fake_answer(prompt, target=None, torch=None):
     if target:
         m = _re.search(r"(\d+)", os.path.basename(target))
         n = m.group(1) if m else "1"
+        kind = ("apitest" if target.startswith("tests/api") else
+                "test" if target.startswith("tests/") else
+                "route" if target.startswith("api/") else
+                "view" if target.startswith("web/views/") else
+                "migration" if target.endswith(".sql") else
+                "spec" if target == ".resource-spec.txt" else
+                "feature" if target.endswith(".py") else None)
+        if kind:
+            b = _broken(kind, n)
+            if b is not None:
+                return b
         # most specific first: tests/ before .sh, api/ before .py
         if target.startswith("tests/api"):
-            return FAKE_APITEST
+            return FAKE_APITEST.replace("{N}", n)
         if target.startswith("tests/"):
             return FAKE_TEST.replace("cli.py count", "cli.py count%s" % n)
         if target.startswith("api/"):
@@ -891,6 +940,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 hid = body["hearth"]
                 run_q(f"resumehearth[{qsym(hid)}]; res: 1b")
                 self._send_json({"halted": False})
+            elif parsed.path == "/api/escalate":
+                pid, tid = body["pid"], body["torch"]
+                r = run_q(f"r: @[{{escalate . x}}; ({qsym(pid)};{qsym(tid)}); {{(enlist `error)!enlist x}}]; "
+                          f"res: `result`state!(r; state[{qsym(pid)}])")
+                if isinstance(r.get("result"), dict) and "error" in r["result"]:
+                    self._send_json({"error": r["result"]["error"]})
+                else:
+                    self._send_json({"state": r["state"]})
             elif parsed.path == "/api/endreason":
                 # set by runner.py (the server-side runner) and by
                 # agent.py's own CLI loop, right after run_prophecy()
