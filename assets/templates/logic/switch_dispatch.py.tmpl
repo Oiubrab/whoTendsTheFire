@@ -1,0 +1,10 @@
+{{HANDLERS}}
+
+{{TABLE}} = {
+{{CASES}}
+}
+
+
+def {{FUNC}}({{KEY}}):
+    """Switch on {{KEY}}: look the handler up, fall back to {{DEFAULT_NAME}}."""
+    return {{TABLE}}.get({{KEY}}, {{DEFAULT_NAME}})()

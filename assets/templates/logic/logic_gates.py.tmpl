@@ -1,0 +1,30 @@
+def AND(a, b):
+    return bool(a and b)
+
+
+def OR(a, b):
+    return bool(a or b)
+
+
+def NOT(a):
+    return not a
+
+
+def XOR(a, b):
+    return bool(a) != bool(b)
+
+
+def NAND(a, b):
+    return NOT(AND(a, b))
+
+
+def NOR(a, b):
+    return NOT(OR(a, b))
+
+
+GATES = {"AND": AND, "OR": OR, "XOR": XOR, "NAND": NAND, "NOR": NOR}
+
+
+def truth_table(gate):
+    """Every input pair and the gate's answer, in a fixed order."""
+    return [(a, b, GATES[gate](a, b)) for a in (False, True) for b in (False, True)]

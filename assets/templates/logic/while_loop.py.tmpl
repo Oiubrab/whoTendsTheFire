@@ -1,0 +1,7 @@
+def {{FUNC}}({{START}}):
+    """Repeat while {{START}} {{CONTINUE_OP}} {{BOUND}}; counts the steps taken."""
+    steps = 0
+    while {{START}} {{CONTINUE_OP}} {{BOUND}}:
+        {{START}} = {{START}} {{STEP_OP}} {{STEP}}
+        steps += 1
+    return steps

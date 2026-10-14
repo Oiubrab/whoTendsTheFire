@@ -1,0 +1,6 @@
+def {{FUNC}}({{COLLECTION}}):
+    """Visit every item in {{COLLECTION}} once, {{ACCUMULATE_VERB}} as we go."""
+    {{ACC}} = {{ACC_START}}
+    for {{ITEM}} in {{COLLECTION}}:
+        {{ACC}} {{ACC_OP}} {{ITEM_EXPR}}
+    return {{ACC}}

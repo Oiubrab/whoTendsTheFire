@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Render the basic logic constructs from assets/templates/logic/.
+
+Same convention as resource.py: `{{KEY}}` placeholders, filled by plain
+substitution. The point of this file is the division of labour. The shape
+of an if/else, a loop or a switch is law -- it was settled decades ago and
+lives in the template. What is left to choose is small and nameable: what
+to call the function, which operator, which limit, which labels. Variable
+length pieces (how many elif branches, how many switch cases) are expanded
+here by code, so nothing about structure is ever left to a model.
+
+    python3 tools/logic.py                 # render every example to stdout
+    python3 tools/logic.py --check         # render each, EXECUTE it, assert
+"""
+
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+TEMPLATES = ROOT / "templates" / "logic"
+
+COMPARE_OPS = {"<", "<=", ">", ">=", "==", "!="}
+ACC_OPS = {"+=", "-=", "*=", "|=", "&="}
+STEP_OPS = {"+", "-", "*"}
+
+
+class LogicError(Exception):
+    pass
+
+
+def render(name, toks):
+    text = (TEMPLATES / name).read_text()
+    for key, val in toks.items():
+        text = text.replace("{{%s}}" % key, str(val))
+    if "{{" in text:
+        left = text[text.index("{{"):].split("}}")[0] + "}}"
+        raise LogicError("%s: unfilled placeholder %s" % (name, left))
+    return text
+
+
+def need(spec, *keys):
+    missing = [k for k in keys if k not in spec]
+    if missing:
+        raise LogicError("spec missing: %s" % ", ".join(missing))
+
+
+def one_of(value, allowed, what):
+    if value not in allowed:
+        raise LogicError("%s %r is not one of %s" % (what, value, sorted(allowed)))
+    return value
+
+
+def if_else(spec):
+    need(spec, "func", "arg", "op", "limit", "then", "else")
+    return render("if_else.py.tmpl", {
+        "FUNC": spec["func"], "ARG": spec["arg"],
+        "OP": one_of(spec["op"], COMPARE_OPS, "operator"),
+        "LIMIT": spec["limit"],
+        "THEN_LABEL": spec["then"], "ELSE_LABEL": spec["else"],
+    })
+
+
+def if_elif_else(spec):
+    """branches: [(op, limit, label), ...] tried in order."""
+    need(spec, "func", "arg", "branches", "default")
+    if not spec["branches"]:
+        raise LogicError("an if/elif chain needs at least one branch")
+    lines = []
+    for i, (op, limit, label) in enumerate(spec["branches"]):
+        kw = "if" if i == 0 else "elif"
+        one_of(op, COMPARE_OPS, "operator")
+        lines.append("    %s %s %s %s:" % (kw, spec["arg"], op, limit))
+        lines.append('        return "%s"' % label)
+    return render("if_elif_else.py.tmpl", {
+        "FUNC": spec["func"], "ARG": spec["arg"],
+        "BRANCHES": "\n".join(lines), "DEFAULT_LABEL": spec["default"],
+    })
+
+
+def for_loop(spec):
+    need(spec, "func", "collection", "item", "acc", "acc_start", "acc_op", "item_expr", "verb")
+    return render("for_loop.py.tmpl", {
+        "FUNC": spec["func"], "COLLECTION": spec["collection"],
+        "ITEM": spec["item"], "ACC": spec["acc"], "ACC_START": spec["acc_start"],
+        "ACC_OP": one_of(spec["acc_op"], ACC_OPS, "accumulator operator"),
+        "ITEM_EXPR": spec["item_expr"], "ACCUMULATE_VERB": spec["verb"],
+    })
+
+
+def while_loop(spec):
+    need(spec, "func", "start", "continue_op", "bound", "step_op", "step")
+    return render("while_loop.py.tmpl", {
+        "FUNC": spec["func"], "START": spec["start"],
+        "CONTINUE_OP": one_of(spec["continue_op"], COMPARE_OPS, "operator"),
+        "BOUND": spec["bound"],
+        "STEP_OP": one_of(spec["step_op"], STEP_OPS, "step operator"),
+        "STEP": spec["step"],
+    })
+
+
+def switch_dispatch(spec):
+    """cases: {key: returned_text}; one tiny handler is generated per case."""
+    need(spec, "func", "key", "cases", "default")
+    if not spec["cases"]:
+        raise LogicError("a switch needs at least one case")
+    handlers, rows = [], []
+    for case_key, text in spec["cases"].items():
+        ident = "".join(c if c.isalnum() else "_" for c in str(case_key)).lower()
+        h = "_on_%s" % ident
+        handlers.append('def %s():\n    return "%s"\n' % (h, text))
+        rows.append('    "%s": %s,' % (case_key, h))
+    handlers.append('def _on_default():\n    return "%s"\n' % spec["default"])
+    return render("switch_dispatch.py.tmpl", {
+        "FUNC": spec["func"], "KEY": spec["key"], "TABLE": "_CASES",
+        "HANDLERS": "\n".join(handlers).rstrip("\n"),
+        "CASES": "\n".join(rows), "DEFAULT_NAME": "_on_default",
+    })
+
+
+def logic_gates(spec=None):
+    return render("logic_gates.py.tmpl", {})
+
+
+# one worked example per construct -- what a torch would hand the renderer
+EXAMPLES = {
+    "if_else": (if_else, dict(func="is_adult", arg="age", op=">=", limit=18,
+                              then="adult", **{"else": "minor"})),
+    "if_elif_else": (if_elif_else, dict(func="grade", arg="score", default="F",
+                                        branches=[(">=", 90, "A"), (">=", 80, "B"), (">=", 70, "C")])),
+    "for_loop": (for_loop, dict(func="total", collection="numbers", item="n", acc="result",
+                                acc_start=0, acc_op="+=", item_expr="n", verb="summing")),
+    "while_loop": (while_loop, dict(func="halvings", start="n", continue_op=">", bound=1,
+                                    step_op="-", step=1)),
+    "switch_dispatch": (switch_dispatch, dict(func="describe", key="code", default="unknown",
+                                              cases={"r": "red", "g": "green", "b": "blue"})),
+    "logic_gates": (logic_gates, {}),
+}
+
+
+def check():
+    """Execute every rendered example and assert what it actually does."""
+    failures = 0
+
+    def run(name, expect):
+        nonlocal failures
+        fn, spec = EXAMPLES[name]
+        ns = {}
+        exec(compile(fn(spec), name, "exec"), ns)
+        try:
+            expect(ns)
+            print("ok   %-16s renders, runs, behaves" % name)
+        except AssertionError as e:
+            failures += 1
+            print("FAIL %-16s %s" % (name, e))
+
+    def t_if_else(ns):
+        assert ns["is_adult"](18) == "adult" and ns["is_adult"](17) == "minor"
+
+    def t_chain(ns):
+        g = ns["grade"]
+        assert [g(95), g(85), g(75), g(10)] == ["A", "B", "C", "F"], "chain order wrong"
+        assert g(90) == "A", "boundary must hit the first branch"
+
+    def t_for(ns):
+        assert ns["total"]([1, 2, 3, 4]) == 10 and ns["total"]([]) == 0
+
+    def t_while(ns):
+        assert ns["halvings"](5) == 4 and ns["halvings"](1) == 0
+
+    def t_switch(ns):
+        d = ns["describe"]
+        assert d("r") == "red" and d("b") == "blue" and d("zzz") == "unknown"
+
+    def t_gates(ns):
+        tt = {g: [r[2] for r in ns["truth_table"](g)] for g in ns["GATES"]}
+        assert tt["AND"] == [False, False, False, True], tt["AND"]
+        assert tt["OR"] == [False, True, True, True], tt["OR"]
+        assert tt["XOR"] == [False, True, True, False], tt["XOR"]
+        assert tt["NAND"] == [True, True, True, False], tt["NAND"]
+        assert tt["NOR"] == [True, False, False, False], tt["NOR"]
+        assert ns["NOT"](True) is False
+
+    run("if_else", t_if_else)
+    run("if_elif_else", t_chain)
+    run("for_loop", t_for)
+    run("while_loop", t_while)
+    run("switch_dispatch", t_switch)
+    run("logic_gates", t_gates)
+
+    # the gates a model might get wrong must be REFUSED, not rendered
+    for label, call in [
+        ("bad operator", lambda: if_else(dict(func="f", arg="x", op="=>", limit=1, then="a", **{"else": "b"}))),
+        ("empty chain", lambda: if_elif_else(dict(func="f", arg="x", branches=[], default="d"))),
+        ("missing key", lambda: while_loop(dict(func="f"))),
+        ("empty switch", lambda: switch_dispatch(dict(func="f", key="k", cases={}, default="d"))),
+    ]:
+        try:
+            call()
+            failures += 1
+            print("FAIL refusal: %s was rendered" % label)
+        except LogicError:
+            print("ok   refuses %s" % label)
+
+    print("%d failure(s)" % failures)
+    return 1 if failures else 0
+
+
+def main():
+    if "--check" in sys.argv:
+        return check()
+    for name, (fn, spec) in EXAMPLES.items():
+        print("# ---- %s ----" % name)
+        print(fn(spec))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
