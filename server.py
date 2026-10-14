@@ -242,6 +242,22 @@ FAKE_RESOURCE_SPECS = ["widget: label:text, qty:integer, done:boolean",
 FAKE_RESOURCE_CALLS = []
 
 
+# A canned compose plan: a real plan in the real grammar, so the harness
+# exercises tools/compose.py rather than a stand-in. Every block here must
+# render, insert and compile, or the canned run proves nothing.
+FAKE_COMPOSE_PLAN = """newfile features/grading.py skeleton=py_module doc="grading helpers built from blocks"
+render if_elif_else as grader func=grade arg=score default=F branch=">=:90:A" branch=">=:80:B" branch=">=:70:C"
+render switch_dispatch as colours func=describe key=code default=unknown case=r:red case=g:green case=b:blue
+render for_loop as summer func=total collection=numbers item=n acc=result acc_start=0 acc_op=+= item_expr=n verb=summing
+render logic_gates as gates
+import "import os" into features/grading.py
+insert grader into features/grading.py slot=body
+insert colours into features/grading.py slot=body
+insert summer into features/grading.py slot=body
+insert gates into features/grading.py slot=body
+"""
+
+
 def fake_answer(prompt, target=None, torch=None):
     import re as _re
     """Canned but REAL artifacts -- they must actually compile, run and
@@ -271,6 +287,8 @@ def fake_answer(prompt, target=None, torch=None):
             return FAKE_FEATURE.replace('"count"', '"count%s"' % n)
         if target.endswith(".sh"):
             return FAKE_DEMO
+        if target == ".compose-plan.txt":
+            return FAKE_COMPOSE_PLAN
         if target == ".resource-spec.txt":
             i = min(len(FAKE_RESOURCE_CALLS), len(FAKE_RESOURCE_SPECS) - 1)
             FAKE_RESOURCE_CALLS.append(1)

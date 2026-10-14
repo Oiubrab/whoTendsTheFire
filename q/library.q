@@ -126,6 +126,9 @@ scaf[`scaffold.tools; "tools/parseresource.py"]
 scaf[`scaffold.tools; "tools/checkresource.py"]
 scaf[`scaffold.tools; "tools/progresscheck.py"]
 scaf[`scaffold.tools; "tools/resource.py"]
+scaf[`scaffold.tools; "tools/slot.py"]
+scaf[`scaffold.tools; "tools/logic.py"]
+scaf[`scaffold.tools; "tools/compose.py"]
 addrequire[`scaffold.tools; `tree]
 addprovide[`scaffold.tools; `; `tools]
 
@@ -135,7 +138,7 @@ addprovide[`scaffold.tools; `; `tools]
 / scaffold.tools: tools/resource.py is code, these are the data it reads,
 / and a torch that needs one should not have to require the other by
 / accident of bundling.
-addtorch[`scaffold.templates; `action; ""; "python3 tools/resource.py selftest"; enlist `done]
+addtorch[`scaffold.templates; `action; ""; "python3 tools/resource.py selftest && python3 tools/compose.py --check"; enlist `done]
 scaf[`scaffold.templates; "templates/table.sql.tmpl"]
 scaf[`scaffold.templates; "templates/api_list.py.tmpl"]
 scaf[`scaffold.templates; "templates/api_create.py.tmpl"]
@@ -148,6 +151,13 @@ scaf[`scaffold.templates; "templates/view_list.js.tmpl"]
 scaf[`scaffold.templates; "templates/view_form.js.tmpl"]
 scaf[`scaffold.templates; "templates/test_roundtrip.sh.tmpl"]
 scaf[`scaffold.templates; "templates/test_cli.sh.tmpl"]
+scaf[`scaffold.templates; "templates/logic/if_else.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/if_elif_else.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/for_loop.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/while_loop.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/switch_dispatch.py.tmpl"]
+scaf[`scaffold.templates; "templates/logic/logic_gates.py.tmpl"]
+scaf[`scaffold.templates; "templates/skeletons/py_module.py.tmpl"]
 addrequire[`scaffold.templates; `tools]
 addrequire[`scaffold.templates; `shared]
 addprovide[`scaffold.templates; `; `templates]
@@ -746,7 +756,7 @@ addedge[`g.document; `verify.progress; `fail;     `]
   addedge[g; `kindle.next; `decline; `];
   {[g;lbl] addedge[g; `choose.graph; lbl; `]}[g] each
     `g.feature`g.route`g.view`g.schema`g.fullstack`g.resource`g.harden`g.document
- } each `g.found`g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document`g.resource;
+ } each `g.found`g.feature`g.route`g.view`g.schema`g.fullstack`g.harden`g.document`g.resource`g.compose;
 
 / ---- capability gates on the checks themselves ----
 / Declared here, after the graphs, because they are about the graphs: a
@@ -855,6 +865,59 @@ addedge[`g.resource; `docs.generate;       `done;     `git.commit]
 addedge[`g.resource; `git.commit;      `done;     `verify.progress]
 addedge[`g.resource; `verify.progress; `pass;     `kindle.next]
 addedge[`g.resource; `verify.progress; `fail;     `]
+
+
+/ ---- composing: a script built out of blocks ----
+/ The grain the resource torches set -- one template, one output, nothing
+/ else -- applied below the level of a whole artifact. g.resource stamps a
+/ finished CRUD module out of one naming choice; this puts individual
+/ blocks (an if chain, a loop, a switch, a set of gates) into named spots
+/ in a script, and adds the imports they need.
+/ The model writes ONE file, a plan in a closed grammar (tools/compose.py):
+/ which blocks, what to call things, where they go. It never writes the
+/ blocks, never picks their shape, and never decides where one lands --
+/ the slot marker in the target does. The four phases that apply the plan
+/ always run in the same order, one torch each, so a plan cannot insert
+/ a block before it exists, and each phase is idempotent.
+/ A block that fails its check is a template bug, not something to guess
+/ at -- those checks roll the generation back. Only the plan itself, the
+/ one place a choice was made, gets a repair path.
+
+addauthor[`declare.compose; `authoring;
+  "Plan ONE new helper module, built from blocks. Reply with the plan only, one operation per line, nothing else.\n\nOperations:\n  newfile features/NAME.py skeleton=py_module doc=\"what it is for\"\n  render CONSTRUCT as BLOCK key=value ...\n  insert BLOCK into features/NAME.py slot=body\n  import \"import x\" into features/NAME.py\n\nConstructs and their keys:\n  if_else      func arg op limit then else\n  if_elif_else func arg default branch=OP:LIMIT:LABEL (repeat)\n  for_loop     func collection item acc acc_start acc_op item_expr verb\n  while_loop   func start continue_op bound step_op step\n  switch_dispatch func key default case=KEY:TEXT (repeat)\n  logic_gates  (no keys)\n\nOperators are < <= > >= == !=. Names are lowercase python identifiers. Labels have no quotes. Choose names that say what the block does. Look at SURVEY.txt above and do not reuse a module name that already exists.";
+  ".compose-plan.txt"; ""; enlist `written]
+addrequire[`declare.compose; `templates]
+addrequire[`declare.compose; `tools]
+
+addtorch[`verify.compose; `validation; ""; "python3 tools/compose.py check"; `pass`fail]
+
+addauthor[`repair.compose; `authoring;
+  "The plan above was rejected -- the error names the line. Reply with the complete corrected plan, one operation per line, same grammar: newfile / render ... as ... / insert ... into ... slot=... / import \"...\" into ... . Operators are < <= > >= == !=; names are lowercase identifiers; labels contain no quotes.";
+  ".compose-plan.txt"; ""; enlist `repaired]
+
+addtorch[`compose.newfile; `action; ""; "python3 tools/compose.py apply newfile"; enlist `done]
+addtorch[`compose.render;  `action; ""; "python3 tools/compose.py apply render";  enlist `done]
+addtorch[`compose.insert;  `action; ""; "python3 tools/compose.py apply insert";  enlist `done]
+addtorch[`compose.import;  `action; ""; "python3 tools/compose.py apply import";  enlist `done]
+
+addgraph[`g.compose; `declare.compose; "build a helper module from blocks -- branches, loops, switches, gates -- placed by slot, with no free-form code"]
+addto[`g.compose;] each `declare.compose`verify.compose`repair.compose`compose.newfile`compose.render`compose.insert`compose.import`verify.compile`tidy.run`survey.run`docs.generate`git.commit`verify.progress`kindle.next`choose.graph;
+addedge[`g.compose; `declare.compose;  `written;  `verify.compose]
+addedge[`g.compose; `verify.compose;   `fail;     `repair.compose]
+addedge[`g.compose; `repair.compose;   `repaired; `verify.compose]
+addedge[`g.compose; `verify.compose;   `pass;     `compose.newfile]
+addedge[`g.compose; `compose.newfile;  `done;     `compose.render]
+addedge[`g.compose; `compose.render;   `done;     `compose.insert]
+addedge[`g.compose; `compose.insert;   `done;     `compose.import]
+addedge[`g.compose; `compose.import;   `done;     `verify.compile]
+addedge[`g.compose; `verify.compile;   `fail;     `]
+addedge[`g.compose; `verify.compile;   `pass;     `tidy.run]
+addedge[`g.compose; `tidy.run;         `done;     `survey.run]
+addedge[`g.compose; `survey.run;       `done;     `docs.generate]
+addedge[`g.compose; `docs.generate;    `done;     `git.commit]
+addedge[`g.compose; `git.commit;       `done;     `verify.progress]
+addedge[`g.compose; `verify.progress;  `pass;     `kindle.next]
+addedge[`g.compose; `verify.progress;  `fail;     `kindle.next]
 
 / g.resource's kindle.next/choose.graph wiring is now handled in the
 / shared loop above, alongside the other eight graphs.

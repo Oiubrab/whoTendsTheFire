@@ -10,3 +10,4 @@ app.db
 data.json
 config.json
 .DS_Store
+.compose/

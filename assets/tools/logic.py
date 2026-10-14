@@ -28,6 +28,45 @@ class LogicError(Exception):
     pass
 
 
+# Everything a spec supplies ends up pasted into source code, so every value
+# is checked against what its position in the template can safely hold. The
+# first version trusted its inputs, which is fine for a hand-written example
+# and wrong the moment a model supplies them: a limit of `1: import os`
+# renders into a different program, and a label containing a quote renders
+# into a syntax error.
+import keyword
+import re
+
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# small arithmetic expressions over names and numbers: no quotes, no
+# colons, no semicolons, no newlines, so no way to start a new statement
+_EXPR = re.compile(r"^[A-Za-z0-9_.+\-*/%() \[\]]+$")
+_LABEL_BAD = re.compile(r'["\\\n\r{}]')
+
+
+def ident(value, what):
+    v = str(value)
+    if not _IDENT.match(v) or keyword.iskeyword(v):
+        raise LogicError("%s %r is not a usable python name" % (what, v))
+    return v
+
+
+def expr(value, what):
+    v = str(value)
+    if not _EXPR.match(v) or v.strip() != v or "  " in v:
+        raise LogicError("%s %r is not a plain arithmetic expression" % (what, v))
+    if v.count("(") != v.count(")") or v.count("[") != v.count("]"):
+        raise LogicError("%s %r has unbalanced brackets" % (what, v))
+    return v
+
+
+def label(value, what):
+    v = str(value)
+    if not v or _LABEL_BAD.search(v):
+        raise LogicError("%s %r must be non-empty text with no quotes, backslashes, braces or newlines" % (what, v))
+    return v
+
+
 def render(name, toks):
     text = (TEMPLATES / name).read_text()
     for key, val in toks.items():
@@ -53,10 +92,11 @@ def one_of(value, allowed, what):
 def if_else(spec):
     need(spec, "func", "arg", "op", "limit", "then", "else")
     return render("if_else.py.tmpl", {
-        "FUNC": spec["func"], "ARG": spec["arg"],
+        "FUNC": ident(spec["func"], "function name"), "ARG": ident(spec["arg"], "argument"),
         "OP": one_of(spec["op"], COMPARE_OPS, "operator"),
-        "LIMIT": spec["limit"],
-        "THEN_LABEL": spec["then"], "ELSE_LABEL": spec["else"],
+        "LIMIT": expr(spec["limit"], "limit"),
+        "THEN_LABEL": label(spec["then"], "then label"),
+        "ELSE_LABEL": label(spec["else"], "else label"),
     })
 
 
@@ -65,36 +105,41 @@ def if_elif_else(spec):
     need(spec, "func", "arg", "branches", "default")
     if not spec["branches"]:
         raise LogicError("an if/elif chain needs at least one branch")
+    arg = ident(spec["arg"], "argument")
     lines = []
-    for i, (op, limit, label) in enumerate(spec["branches"]):
+    for i, (op, limit, text) in enumerate(spec["branches"]):
         kw = "if" if i == 0 else "elif"
         one_of(op, COMPARE_OPS, "operator")
-        lines.append("    %s %s %s %s:" % (kw, spec["arg"], op, limit))
-        lines.append('        return "%s"' % label)
+        lines.append("    %s %s %s %s:" % (kw, arg, op, expr(limit, "branch limit")))
+        lines.append('        return "%s"' % label(text, "branch label"))
     return render("if_elif_else.py.tmpl", {
-        "FUNC": spec["func"], "ARG": spec["arg"],
-        "BRANCHES": "\n".join(lines), "DEFAULT_LABEL": spec["default"],
+        "FUNC": ident(spec["func"], "function name"), "ARG": arg,
+        "BRANCHES": "\n".join(lines),
+        "DEFAULT_LABEL": label(spec["default"], "default label"),
     })
 
 
 def for_loop(spec):
     need(spec, "func", "collection", "item", "acc", "acc_start", "acc_op", "item_expr", "verb")
     return render("for_loop.py.tmpl", {
-        "FUNC": spec["func"], "COLLECTION": spec["collection"],
-        "ITEM": spec["item"], "ACC": spec["acc"], "ACC_START": spec["acc_start"],
+        "FUNC": ident(spec["func"], "function name"),
+        "COLLECTION": ident(spec["collection"], "collection"),
+        "ITEM": ident(spec["item"], "item"), "ACC": ident(spec["acc"], "accumulator"),
+        "ACC_START": expr(spec["acc_start"], "accumulator start"),
         "ACC_OP": one_of(spec["acc_op"], ACC_OPS, "accumulator operator"),
-        "ITEM_EXPR": spec["item_expr"], "ACCUMULATE_VERB": spec["verb"],
+        "ITEM_EXPR": expr(spec["item_expr"], "item expression"),
+        "ACCUMULATE_VERB": label(spec["verb"], "verb"),
     })
 
 
 def while_loop(spec):
     need(spec, "func", "start", "continue_op", "bound", "step_op", "step")
     return render("while_loop.py.tmpl", {
-        "FUNC": spec["func"], "START": spec["start"],
+        "FUNC": ident(spec["func"], "function name"), "START": ident(spec["start"], "counter"),
         "CONTINUE_OP": one_of(spec["continue_op"], COMPARE_OPS, "operator"),
-        "BOUND": spec["bound"],
+        "BOUND": expr(spec["bound"], "bound"),
         "STEP_OP": one_of(spec["step_op"], STEP_OPS, "step operator"),
-        "STEP": spec["step"],
+        "STEP": expr(spec["step"], "step"),
     })
 
 
@@ -103,16 +148,21 @@ def switch_dispatch(spec):
     need(spec, "func", "key", "cases", "default")
     if not spec["cases"]:
         raise LogicError("a switch needs at least one case")
-    handlers, rows = [], []
+    handlers, rows, seen = [], [], set()
     for case_key, text in spec["cases"].items():
-        ident = "".join(c if c.isalnum() else "_" for c in str(case_key)).lower()
-        h = "_on_%s" % ident
-        handlers.append('def %s():\n    return "%s"\n' % (h, text))
+        case_key = label(case_key, "case key")
+        slug = "".join(c if c.isalnum() else "_" for c in case_key).lower()
+        h = "_on_%s" % slug
+        if h in seen:
+            raise LogicError("case key %r collides with another case once made a name" % case_key)
+        seen.add(h)
+        handlers.append('def %s():\n    return "%s"\n' % (h, label(text, "case text")))
         rows.append('    "%s": %s,' % (case_key, h))
-    handlers.append('def _on_default():\n    return "%s"\n' % spec["default"])
+    handlers.append('def _on_default():\n    return "%s"\n' % label(spec["default"], "default text"))
     return render("switch_dispatch.py.tmpl", {
-        "FUNC": spec["func"], "KEY": spec["key"], "TABLE": "_CASES",
-        "HANDLERS": "\n".join(handlers).rstrip("\n"),
+        "FUNC": ident(spec["func"], "function name"), "KEY": ident(spec["key"], "key argument"),
+        "TABLE": "_CASES",
+        "HANDLERS": "\n\n".join(h.rstrip("\n") for h in handlers),
         "CASES": "\n".join(rows), "DEFAULT_NAME": "_on_default",
     })
 
@@ -193,6 +243,11 @@ def check():
         ("empty chain", lambda: if_elif_else(dict(func="f", arg="x", branches=[], default="d"))),
         ("missing key", lambda: while_loop(dict(func="f"))),
         ("empty switch", lambda: switch_dispatch(dict(func="f", key="k", cases={}, default="d"))),
+        ("statement smuggled into a limit", lambda: if_else(dict(func="f", arg="x", op=">", limit="1: import os", then="a", **{"else": "b"}))),
+        ("keyword as a name", lambda: if_else(dict(func="class", arg="x", op=">", limit=1, then="a", **{"else": "b"}))),
+        ("quote in a label", lambda: if_else(dict(func="f", arg="x", op=">", limit=1, then='a"b', **{"else": "b"}))),
+        ("call in an expression slot", lambda: for_loop(dict(func="f", collection="c", item="i", acc="a", acc_start=0, acc_op="+=", item_expr="open('x')", verb="v"))),
+        ("two cases that become one name", lambda: switch_dispatch(dict(func="f", key="k", default="d", cases={"a-b": "x", "a_b": "y"}))),
     ]:
         try:
             call()
